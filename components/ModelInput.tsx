@@ -1,22 +1,23 @@
-
 import React from 'react';
 import { CalculatorIcon } from './icons/CalculatorIcon';
+import { ModelBuilder } from './ModelBuilder';
+import { VariableDef } from '../types';
 
 interface ModelInputProps {
-  value: string;
-  onChange: (value: string) => void;
+  variables: VariableDef[];
+  setVariables: React.Dispatch<React.SetStateAction<VariableDef[]>>;
+  probabilities: Record<string, number>;
+  setProbabilities: React.Dispatch<React.SetStateAction<Record<string, number>>>;
+  error: string | null;
 }
 
-const exampleModel = `[
-  { "states": { "VarX": "A", "VarY": "1" }, "probability": 0.25 },
-  { "states": { "VarX": "A", "VarY": "2" }, "probability": 0.1 },
-  { "states": { "VarX": "B", "VarY": "1" }, "probability": 0.15 },
-  { "states": { "VarX": "B", "VarY": "2" }, "probability": 0.2 },
-  { "states": { "VarX": "C", "VarY": "1" }, "probability": 0.1 },
-  { "states": { "VarX": "C", "VarY": "2" }, "probability": 0.2 }
-]`;
-
-export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange }) => {
+export const ModelInput: React.FC<ModelInputProps> = ({ 
+  variables, 
+  setVariables, 
+  probabilities, 
+  setProbabilities,
+  error 
+}) => {
   return (
     <div className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
       <div className="flex items-center mb-4">
@@ -24,14 +25,17 @@ export const ModelInput: React.FC<ModelInputProps> = ({ value, onChange }) => {
         <h2 className="text-2xl font-bold text-gray-100">2. Define a Model (Optional)</h2>
       </div>
       <p className="text-gray-400 mb-4">
-        Provide a theoretical Joint PMF in JSON format to compare against your data.
+        Define variables and their states to build a probability table for your theoretical model.
       </p>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={exampleModel}
-        className="w-full h-64 p-3 bg-gray-900 text-gray-300 border border-gray-600 rounded-md focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-colors font-mono text-sm"
+      
+      <ModelBuilder
+        variables={variables}
+        setVariables={setVariables}
+        probabilities={probabilities}
+        setProbabilities={setProbabilities}
       />
+
+      {error && <p id="model-error" className="mt-4 text-sm text-red-400 bg-red-900/30 p-2 rounded-md">{error}</p>}
     </div>
   );
 };

@@ -1,4 +1,3 @@
-
 export interface CsvData {
   headers: string[];
   rows: (string | number)[][];
@@ -17,4 +16,9 @@ export type ProbabilityModel = PmfEntry[];
 
 export interface Distribution {
   [key: string]: number;
+}
+
+export interface VariableDef {
+  name: string;
+  states: string; // Comma-separated string of states
 }

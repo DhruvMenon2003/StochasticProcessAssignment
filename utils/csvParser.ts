@@ -1,4 +1,3 @@
-
 import { CsvData } from '../types';
 
 export function parseCsvData(csvString: string): CsvData {
