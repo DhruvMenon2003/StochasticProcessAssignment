@@ -1,0 +1,5 @@
+{
+  "name": "Stochastic Process Assignment Helper",
+  "description": "An advanced tool to analyze datasets using stochastic process concepts. It calculates empirical distributions, compares them against theoretical models using various metrics (Hellinger Distance, MSE), and provides insights on model fit, stochastic dependence, and Markov chain properties.",
+  "requestFramePermissions": []
+}
