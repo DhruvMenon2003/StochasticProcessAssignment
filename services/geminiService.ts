@@ -63,8 +63,10 @@ export async function getAnalysisExplanation(results: AnalysisResult): Promise<s
     1.  **Model Fit Evaluation:** If models were provided, start with a clear conclusion about which model fits best.
         - If it's a **multi-variable** analysis, explain that the best model is chosen based on the lowest **composite score**.
         - If it's a **single-variable** analysis, explain that the best model is the one that performs best on the highest number of individual metrics (most **wins**).
-        - Reference the individual metrics (Hellinger, MSE, etc.) to justify the choice and explain what they mean in simple terms (lower is better for all).
-    2.  **Variable Dependence:** If it's a multi-variable analysis, explain what the Mutual Information value means. A value of 0 implies independence; higher values indicate stronger dependence.
+        - Justify the choice by explaining the metrics:
+            - **Hellinger Distance & KL Divergence:** Explain these as measures of the difference between the model's probability distribution and the data's real distribution. Lower is better.
+            - **Mean Squared Error (MSE):** Explain that this is calculated using the bias-variance decomposition (MSE = Bias² + Model Variance). This measures not just error but the model's own internal variance plus its systematic bias (how far its average prediction is from the data's average). For multi-variable cases, the reported MSE is the average of this value across all variables. Lower is better.
+    2.  **Variable Dependence:** If it's a multi-variable analysis, explain what the Mutual Information value means. A value near 0 implies independence; higher values indicate stronger dependence.
     3.  **Process Characteristics (Advanced Analysis):**
         - **Time Homogeneity:** Explain the test result. If a variable is 'non-homogeneous' (maxDistance > 0.1), it means its behavior changes over time. If 'homogeneous', its properties are stable.
         - **Self-Dependence:** Explain the Markov Order test. For a variable to be 'Markovian' (based on our 1st order test), its future state depends on its present state, not just random chance. Explain what this implies about the data's memory.

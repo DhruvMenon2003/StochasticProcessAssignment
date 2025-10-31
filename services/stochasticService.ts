@@ -85,17 +85,17 @@ const getMarginals = (jointPMF: Distribution, headers: string[]): { [key: string
 
 const calculateMoments = (dist: Distribution): { mean: number; variance: number } => {
     let mean = 0;
-    let n = 0;
+    
+    // First pass to calculate mean
     for (const state in dist) {
         const numState = Number(state);
         if (!isNaN(numState)) {
             mean += numState * dist[state];
-            n++;
         }
     }
-    if(n === 0) return { mean: 0, variance: 0}; // Non-numeric states
 
     let variance = 0;
+    // Second pass to calculate variance
     for (const state in dist) {
         const numState = Number(state);
         if (!isNaN(numState)) {
@@ -129,28 +129,20 @@ const hellingerDistance = (p: Distribution, q: Distribution): number => {
     return Math.sqrt(sum) / Math.sqrt(2);
 };
 
-const meanSquaredError = (p: Distribution, q: Distribution): number => {
-    const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
-    if (allKeys.size === 0) return 0;
-    let sum = 0;
-    allKeys.forEach(key => {
-        const pVal = p[key] || 0;
-        const qVal = q[key] || 0;
-        sum += (pVal - qVal)**2;
-    });
-    return sum / allKeys.size;
-};
-
 const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => {
+    const epsilon = 1e-10; // Small value to avoid log(0)
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
     let divergence = 0;
+
     for (const key of allKeys) {
         const pVal = p[key] || 0;
         const qVal = q[key] || 0;
-        if (pVal > 0 && qVal > 0) {
-            divergence += pVal * Math.log(pVal / qVal);
-        } else if (pVal > 0 && qVal === 0) {
-            return Infinity;
+
+        if (pVal > 0) {
+            // Use epsilon for qVal if it's zero, to avoid infinity.
+            // This is inspired by the MATLAB function's recommendation.
+            const qValAdjusted = qVal === 0 ? epsilon : qVal;
+            divergence += pVal * Math.log2(pVal / qValAdjusted);
         }
     }
     return divergence;
@@ -356,23 +348,44 @@ export function analyzeData(
         const modelMarginals = getMarginals(modelJoint, data.headers);
         const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
 
+        const empiricalMetricDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;
+        const modelMetricDist = isSingleVariable ? modelDists.marginals[data.headers[0]] : modelJoint;
+        
+        let mse;
         if (isSingleVariable) {
             const singleVarHeader = data.headers[0];
-            const singleVarDist = modelMarginals[singleVarHeader];
-            modelDists.moments = calculateMoments(singleVarDist);
-            modelDists.cmf = calculateCmf(singleVarDist);
+            const empMoments = calculateMoments(empiricalDists.marginals[singleVarHeader]);
+            const modMoments = calculateMoments(modelDists.marginals[singleVarHeader]);
+            modelDists.moments = modMoments;
+            modelDists.cmf = calculateCmf(modelDists.marginals[singleVarHeader]);
+
+            const bias = modMoments.mean - empMoments.mean;
+            mse = (bias ** 2) + modMoments.variance;
+        } else {
+            let totalMse = 0;
+            data.headers.forEach(header => {
+                const empDist = empiricalDists.marginals[header];
+                const modDist = modelDists.marginals[header];
+
+                if (empDist && modDist) {
+                    const empMoments = calculateMoments(empDist);
+                    const modMoments = calculateMoments(modDist);
+
+                    const bias = modMoments.mean - empMoments.mean;
+                    const marginalMse = (bias ** 2) + modMoments.variance;
+                    totalMse += marginalMse;
+                }
+            });
+            mse = data.headers.length > 0 ? totalMse / data.headers.length : 0;
         }
-        
-        const metricSourceDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;
-        const modelMetricSourceDist = isSingleVariable ? modelDists.marginals[data.headers[0]] : modelJoint;
 
         return {
             name,
             distributions: modelDists,
             comparison: {
-                hellingerDistance: hellingerDistance(metricSourceDist, modelMetricSourceDist),
-                meanSquaredError: meanSquaredError(metricSourceDist, modelMetricSourceDist),
-                kullbackLeiblerDivergence: kullbackLeiblerDivergence(metricSourceDist, modelMetricSourceDist),
+                hellingerDistance: hellingerDistance(empiricalMetricDist, modelMetricDist),
+                meanSquaredError: mse,
+                kullbackLeiblerDivergence: kullbackLeiblerDivergence(empiricalMetricDist, modelMetricDist),
             }
         };
     });
@@ -420,7 +433,6 @@ export function analyzeData(
     } else if (modelResults.length > 0) {
         result.bestModelName = modelResults[0].name;
     }
-
 
     result.modelResults = modelResults;
   }
