@@ -1,6 +1,6 @@
-import { CsvData, ProbabilityModel, Distribution } from '../types';
+import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult } from '../types';
 
-// --- New Interfaces for advanced analysis ---
+// --- Interfaces for analysis results ---
 export interface MarkovAnalysis {
   states: (string | number)[];
   transitionMatrix: number[][];
@@ -11,24 +11,33 @@ export interface MarkovResult {
   [header: string]: MarkovAnalysis;
 }
 
-interface CalculatedDistributions {
-  joint: Distribution;
-  marginals: { [key: string]: Distribution };
+export interface TimeHomogeneityResult {
+    [header: string]: {
+        isHomogeneous: boolean;
+        maxDistance: number;
+    }
+}
+
+export interface MarkovOrderResult {
+    [header: string]: {
+        order: number;
+        meanDistance: number;
+        isMarkovian: boolean;
+    }[];
 }
 
 export interface AnalysisResult {
   headers: string[];
+  isSingleVariable: boolean;
   empirical: CalculatedDistributions;
-  model?: CalculatedDistributions;
-  modelComparison?: {
-    hellingerDistance: number;
-    meanSquaredError: number;
-    kullbackLeiblerDivergence: number;
-  };
+  modelResults?: ModelAnalysisResult[];
+  bestModelName?: string;
   dependence?: {
     mutualInformation: number | null;
   };
   markov?: MarkovResult;
+  timeHomogeneityTest?: TimeHomogeneityResult;
+  markovOrderTest?: MarkovOrderResult;
 }
 
 // --- Helper Functions ---
@@ -74,8 +83,42 @@ const getMarginals = (jointPMF: Distribution, headers: string[]): { [key: string
   return marginals;
 };
 
+const calculateMoments = (dist: Distribution): { mean: number; variance: number } => {
+    let mean = 0;
+    let n = 0;
+    for (const state in dist) {
+        const numState = Number(state);
+        if (!isNaN(numState)) {
+            mean += numState * dist[state];
+            n++;
+        }
+    }
+    if(n === 0) return { mean: 0, variance: 0}; // Non-numeric states
+
+    let variance = 0;
+    for (const state in dist) {
+        const numState = Number(state);
+        if (!isNaN(numState)) {
+            variance += ((numState - mean) ** 2) * dist[state];
+        }
+    }
+    return { mean, variance };
+};
+
+const calculateCmf = (dist: Distribution): Distribution => {
+    const sortedStates = Object.keys(dist).sort((a, b) => Number(a) - Number(b));
+    const cmf: Distribution = {};
+    let cumulative = 0;
+    for (const state of sortedStates) {
+        cumulative += dist[state];
+        cmf[state] = cumulative;
+    }
+    return cmf;
+};
+
 // --- Metric Functions ---
 const hellingerDistance = (p: Distribution, q: Distribution): number => {
+    if (!p || !q) return 1;
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
     let sum = 0;
     allKeys.forEach(key => {
@@ -88,6 +131,7 @@ const hellingerDistance = (p: Distribution, q: Distribution): number => {
 
 const meanSquaredError = (p: Distribution, q: Distribution): number => {
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
+    if (allKeys.size === 0) return 0;
     let sum = 0;
     allKeys.forEach(key => {
         const pVal = p[key] || 0;
@@ -100,15 +144,15 @@ const meanSquaredError = (p: Distribution, q: Distribution): number => {
 const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => {
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
     let divergence = 0;
-    allKeys.forEach(key => {
+    for (const key of allKeys) {
         const pVal = p[key] || 0;
         const qVal = q[key] || 0;
         if (pVal > 0 && qVal > 0) {
             divergence += pVal * Math.log(pVal / qVal);
         } else if (pVal > 0 && qVal === 0) {
-            return Infinity; // KL is infinite if p(x) > 0 and q(x) = 0
+            return Infinity;
         }
-    });
+    }
     return divergence;
 };
 
@@ -134,15 +178,17 @@ const getMutualInformation = (jointPMF: Distribution, marginals: { [key: string]
 
 // --- Markov Analysis Functions ---
 const getTransitionMatrix = (series: (string | number)[]): { states: (string | number)[], matrix: number[][] } => {
-    const states = Array.from(new Set(series)).sort();
+    const states = Array.from(new Set(series)).sort((a,b) => String(a).localeCompare(String(b)));
     const stateIndex = new Map(states.map((s, i) => [s, i]));
     const n = states.length;
     const counts = Array(n).fill(0).map(() => Array(n).fill(0));
 
     for (let i = 0; i < series.length - 1; i++) {
-        const from = stateIndex.get(series[i])!;
-        const to = stateIndex.get(series[i+1])!;
-        counts[from][to]++;
+        const from = stateIndex.get(series[i]);
+        const to = stateIndex.get(series[i+1]);
+        if (from !== undefined && to !== undefined) {
+          counts[from][to]++;
+        }
     }
 
     const matrix = counts.map(row => {
@@ -159,7 +205,6 @@ const getStationaryDistribution = (transitionMatrix: number[][], states: (string
     
     let p = Array(n).fill(1 / n); // Start with uniform distribution
     
-    // Power iteration method
     for (let iter = 0; iter < 1000; iter++) {
         const pNext = Array(n).fill(0);
         for (let j = 0; j < n; j++) {
@@ -168,7 +213,6 @@ const getStationaryDistribution = (transitionMatrix: number[][], states: (string
             }
         }
         
-        // Check for convergence
         let diff = 0;
         for (let i = 0; i < n; i++) {
             diff += Math.abs(pNext[i] - p[i]);
@@ -186,17 +230,88 @@ const getStationaryDistribution = (transitionMatrix: number[][], states: (string
     return dist;
 };
 
+// --- New Advanced Analysis Functions ---
+const testTimeHomogeneity = (series: (string | number)[], numSegments: number = 2): { isHomogeneous: boolean; maxDistance: number } => {
+    const segmentLength = Math.floor(series.length / numSegments);
+    if (segmentLength < 20) return { isHomogeneous: true, maxDistance: 0 }; // Not enough data
+
+    const matrices = [];
+    for (let i = 0; i < numSegments; i++) {
+        const segment = series.slice(i * segmentLength, (i + 1) * segmentLength);
+        matrices.push(getTransitionMatrix(segment).matrix);
+    }
+    
+    let maxDist = 0;
+    for (let i = 0; i < numSegments; i++) {
+        for (let j = i + 1; j < numSegments; j++) {
+            const m1 = matrices[i].flat();
+            const m2 = matrices[j].flat();
+            if(m1.length !== m2.length) continue;
+
+            const dist = hellingerDistance(
+                Object.fromEntries(m1.map((p, k) => [k, p])),
+                Object.fromEntries(m2.map((p, k) => [k, p]))
+            );
+            if (dist > maxDist) maxDist = dist;
+        }
+    }
+
+    return {
+        isHomogeneous: maxDist < 0.1, // Threshold from MATLAB example
+        maxDistance: maxDist
+    };
+};
+
+const analyzeMarkovOrder = (series: (string | number)[], maxOrder: number = 1): MarkovOrderResult[string] => {
+    const results = [];
+    if (series.length < 20) return [];
+
+    // Order 1 test
+    const { matrix: tMatrix, states } = getTransitionMatrix(series);
+    const stationaryDist = getStationaryDistribution(tMatrix, states);
+
+    let totalDist = 0;
+    for(let i = 0; i < tMatrix.length; i++) {
+        const rowDist = Object.fromEntries(tMatrix[i].map((p, k) => [states[k], p]));
+        totalDist += hellingerDistance(rowDist, stationaryDist);
+    }
+
+    const meanDist = tMatrix.length > 0 ? totalDist / tMatrix.length : 0;
+    
+    results.push({
+        order: 1,
+        meanDistance: meanDist,
+        isMarkovian: meanDist > 0.1, // If dist is high, it's NOT independent, so it IS Markovian
+    });
+
+    // Higher orders are complex, so we'll stick to a simplified 1st order test.
+    return results;
+};
+
 
 // --- Main Analysis Function ---
-export function analyzeData(data: CsvData, model: ProbabilityModel | null): AnalysisResult {
+export function analyzeData(
+    data: CsvData, 
+    models: {name: string, model: ProbabilityModel}[],
+    options: AnalysisOptions
+): AnalysisResult {
   if (data.rows.length === 0) throw new Error("Dataset has no rows to analyze.");
 
+  const isSingleVariable = data.headers.length === 1;
   const empiricalJoint = getJointPMF(data);
   const empiricalMarginals = getMarginals(empiricalJoint, data.headers);
   const empiricalDists: CalculatedDistributions = { joint: empiricalJoint, marginals: empiricalMarginals };
 
+  if (isSingleVariable) {
+      const singleVarHeader = data.headers[0];
+      const singleVarDist = empiricalMarginals[singleVarHeader];
+      empiricalDists.moments = calculateMoments(singleVarDist);
+      empiricalDists.cmf = calculateCmf(singleVarDist);
+  }
+
   let result: AnalysisResult = { 
     headers: data.headers, 
+    isSingleVariable,
     empirical: empiricalDists 
   };
   
@@ -205,33 +320,109 @@ export function analyzeData(data: CsvData, model: ProbabilityModel | null): Anal
       mutualInformation: getMutualInformation(empiricalJoint, empiricalMarginals, data.headers)
   };
   
-  // Markov analysis (if more than one data point)
-  if (data.rows.length > 1) {
-    const markovResult: MarkovResult = {};
-    data.headers.forEach((header, index) => {
-        const series = data.rows.map(row => row[index]);
-        const { states, matrix } = getTransitionMatrix(series);
-        if (states.length > 0) {
-            const stationaryDistribution = getStationaryDistribution(matrix, states);
-            markovResult[header] = { states, transitionMatrix: matrix, stationaryDistribution };
-        }
-    });
-    result.markov = markovResult;
+  // Advanced analysis if requested
+  if (options.runTimeHomogeneityTest) {
+      const thResults: TimeHomogeneityResult = {};
+      data.headers.forEach((h, i) => {
+          thResults[h] = testTimeHomogeneity(data.rows.map(r => r[i]));
+      });
+      result.timeHomogeneityTest = thResults;
+  }
+   if (options.runMarkovOrderTest) {
+      const moResults: MarkovOrderResult = {};
+      data.headers.forEach((h, i) => {
+          moResults[h] = analyzeMarkovOrder(data.rows.map(r => r[i]));
+      });
+      result.markovOrderTest = moResults;
+      
+      // Perform Markov Chain analysis ONLY if this option is on
+      if (data.rows.length > 1) {
+        const markovResult: MarkovResult = {};
+        data.headers.forEach((header, index) => {
+            const series = data.rows.map(row => row[index]);
+            const { states, matrix } = getTransitionMatrix(series);
+            if (states.length > 0) {
+                const stationaryDistribution = getStationaryDistribution(matrix, states);
+                markovResult[header] = { states, transitionMatrix: matrix, stationaryDistribution };
+            }
+        });
+        result.markov = markovResult;
+      }
   }
 
+  if (models.length > 0) {
+    const modelResults: ModelAnalysisResult[] = models.map(({name, model}) => {
+        const modelJoint = getModelJointPMF(model, data.headers);
+        const modelMarginals = getMarginals(modelJoint, data.headers);
+        const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
 
-  if (model) {
-    const modelJoint = getModelJointPMF(model, data.headers);
-    const modelMarginals = getMarginals(modelJoint, data.headers);
-    const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
+        if (isSingleVariable) {
+            const singleVarHeader = data.headers[0];
+            const singleVarDist = modelMarginals[singleVarHeader];
+            modelDists.moments = calculateMoments(singleVarDist);
+            modelDists.cmf = calculateCmf(singleVarDist);
+        }
+        
+        const metricSourceDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;
+        const modelMetricSourceDist = isSingleVariable ? modelDists.marginals[data.headers[0]] : modelJoint;
+
+        return {
+            name,
+            distributions: modelDists,
+            comparison: {
+                hellingerDistance: hellingerDistance(metricSourceDist, modelMetricSourceDist),
+                meanSquaredError: meanSquaredError(metricSourceDist, modelMetricSourceDist),
+                kullbackLeiblerDivergence: kullbackLeiblerDivergence(metricSourceDist, modelMetricSourceDist),
+            }
+        };
+    });
     
-    result.model = modelDists;
+    // Perform comparison and find best model
+    if (isSingleVariable && modelResults.length > 1) {
+        const metrics: (keyof ModelAnalysisResult['comparison'])[] = ['hellingerDistance', 'meanSquaredError', 'kullbackLeiblerDivergence'];
+        const winners: { [metric: string]: { name: string, value: number } } = {};
 
-    result.modelComparison = {
-        hellingerDistance: hellingerDistance(empiricalJoint, modelJoint),
-        meanSquaredError: meanSquaredError(empiricalJoint, modelJoint),
-        kullbackLeiblerDivergence: kullbackLeiblerDivergence(empiricalJoint, modelJoint),
-    };
+        metrics.forEach(metric => {
+            let bestModel: ModelAnalysisResult | null = null;
+            let bestValue = Infinity;
+            modelResults.forEach(res => {
+                const value = res.comparison[metric];
+                if (isFinite(value) && value < bestValue) {
+                    bestValue = value;
+                    bestModel = res;
+                }
+            });
+            if (bestModel) {
+                winners[metric] = { name: bestModel.name, value: bestValue };
+            }
+        });
+        
+        modelResults.forEach(res => {
+            res.comparisonMetrics = {};
+            res.wins = 0;
+            metrics.forEach(metric => {
+                const value = res.comparison[metric];
+                const isWinner = winners[metric]?.name === res.name && winners[metric]?.value === value;
+                if (isWinner) res.wins!++;
+                res.comparisonMetrics![metric] = { value, isWinner };
+            });
+        });
+        
+        result.bestModelName = modelResults.reduce((best, current) => (current.wins ?? 0) > (best.wins ?? 0) ? current : best).name;
+
+    } else if (!isSingleVariable && modelResults.length > 0) {
+        // Multi-variable composite score logic
+        modelResults.forEach(res => {
+            const { hellingerDistance: hd, meanSquaredError: mse, kullbackLeiblerDivergence: kl } = res.comparison;
+            res.comparison.score = (hd + mse + (isFinite(kl) ? kl / 10 : 1));
+        });
+        result.bestModelName = modelResults.reduce((best, current) => (current.comparison.score ?? Infinity) < (best.comparison.score ?? Infinity) ? current : best).name;
+    } else if (modelResults.length > 0) {
+        result.bestModelName = modelResults[0].name;
+    }
+
+
+    result.modelResults = modelResults;
   }
 
   return result;

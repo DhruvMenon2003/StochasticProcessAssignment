@@ -3,6 +3,9 @@ import { AnalysisResult } from '../services/stochasticService';
 import { MetricCard } from './MetricCard';
 import { Distribution } from '../types';
 import { MarkovDisplay } from './MarkovDisplay';
+import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
+import { ModelComparisonTable } from './ModelComparisonTable';
+import { SingleVariableDisplay } from './SingleVariableDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -53,6 +56,10 @@ const MarginalDistributionDisplay: React.FC<{ dist: Distribution; title: string;
 
 
 export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explanation }) => {
+  if (results.isSingleVariable) {
+    return <SingleVariableDisplay results={results} explanation={explanation} />;
+  }
+  
   return (
     <div className="space-y-12">
       <div className="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
@@ -66,17 +73,20 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
         )}
       </div>
 
-      {results.modelComparison && (
+      {results.modelResults && results.modelResults.length > 0 && (
         <div>
            <h3 className="text-2xl font-bold text-gray-100 mb-4">Model Fit Evaluation</h3>
-           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <MetricCard title="Hellinger Distance" value={results.modelComparison.hellingerDistance.toFixed(5)} description="Measures similarity between two probability distributions. Closer to 0 is a better fit." />
-              <MetricCard title="Mean Squared Error" value={results.modelComparison.meanSquaredError.toFixed(5)} description="Measures the average squared difference between estimated and actual values. Closer to 0 is better." />
-              <MetricCard title="KL Divergence" value={results.modelComparison.kullbackLeiblerDivergence.toFixed(5)} description="Measures how one probability distribution diverges from a second, expected probability distribution. Closer to 0 is better." />
-           </div>
+           <ModelComparisonTable modelResults={results.modelResults} bestModelName={results.bestModelName} />
         </div>
       )}
       
+      {(results.timeHomogeneityTest || results.markovOrderTest) && (
+        <div>
+          <h3 className="text-2xl font-bold text-gray-100 mb-4">Advanced Analysis</h3>
+          <AdvancedAnalysisDisplay results={results} />
+        </div>
+      )}
+
       {results.dependence && results.dependence.mutualInformation !== null && (
         <div>
            <h3 className="text-2xl font-bold text-gray-100 mb-4">Dependence & Information</h3>
@@ -87,32 +97,39 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
       )}
 
       <div>
-        <h3 className="text-2xl font-bold text-gray-100 mb-4">Joint Distributions</h3>
+        <h3 className="text-2xl font-bold text-gray-100 mb-4">Empirical Distributions</h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {results.empirical.joint && <JointDistributionTable dist={results.empirical.joint} title="Empirical Joint PMF" headers={results.headers} />}
-          {results.model?.joint && <JointDistributionTable dist={results.model.joint} title="Model Joint PMF" headers={results.headers} />}
         </div>
-      </div>
-
-      <div>
-        <h3 className="text-2xl font-bold text-gray-100 mb-4">Marginal Distributions</h3>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {results.headers.map(header => (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6">
+           {results.headers.map(header => (
             <React.Fragment key={`${header}-emp`}>
               {results.empirical.marginals[header] && <MarginalDistributionDisplay dist={results.empirical.marginals[header]} title={`Empirical (${header})`} />}
             </React.Fragment>
           ))}
-          {results.model && results.headers.map(header => (
-            <React.Fragment key={`${header}-mod`}>
-              {results.model?.marginals[header] && <MarginalDistributionDisplay dist={results.model.marginals[header]} title={`Model (${header})`} />}
-            </React.Fragment>
-          ))}
         </div>
       </div>
 
+      {results.modelResults?.map(modelResult => (
+         <div key={modelResult.name}>
+          <h3 className="text-2xl font-bold text-gray-100 mb-4">Model Distributions: <span className="text-teal-300">{modelResult.name}</span></h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {modelResult.distributions.joint && <JointDistributionTable dist={modelResult.distributions.joint} title="Model Joint PMF" headers={results.headers} />}
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mt-6">
+            {results.headers.map(header => (
+              <React.Fragment key={`${header}-${modelResult.name}`}>
+                {modelResult.distributions.marginals[header] && <MarginalDistributionDisplay dist={modelResult.distributions.marginals[header]} title={`Model (${header})`} />}
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      ))}
+     
+
       {results.markov && (
         <div>
-          <h3 className="text-2xl font-bold text-gray-100 mb-4">Markov Chain Analysis</h3>
+          <h3 className="text-2xl font-bold text-gray-100 mb-4">First-Order Markov Chain Analysis</h3>
           <MarkovDisplay results={results.markov} />
         </div>
       )}

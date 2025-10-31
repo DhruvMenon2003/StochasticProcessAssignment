@@ -22,3 +22,45 @@ export interface VariableDef {
   name: string;
   states: string; // Comma-separated string of states
 }
+
+export interface ModelDef {
+  id: string;
+  name: string;
+  variables: VariableDef[];
+  probabilities: Record<string, number>;
+  error: string | null;
+  modelString: string;
+}
+
+export interface AnalysisOptions {
+  runMarkovOrderTest: boolean;
+  runTimeHomogeneityTest: boolean;
+}
+
+// --- Analysis Result Types ---
+
+export interface CalculatedDistributions {
+  joint: Distribution;
+  marginals: { [key: string]: Distribution };
+  moments?: { mean: number; variance: number }; // For single variable
+  cmf?: Distribution; // For single variable
+}
+
+export interface ModelAnalysisResult {
+    name: string;
+    distributions: CalculatedDistributions;
+    comparison: {
+        hellingerDistance: number;
+        meanSquaredError: number;
+        kullbackLeiblerDivergence: number;
+        score?: number; // Optional for multi-variable
+    };
+    // For single variable comparison
+    comparisonMetrics?: {
+        [metricName: string]: {
+            value: number;
+            isWinner: boolean;
+        };
+    };
+    wins?: number;
+}

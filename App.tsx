@@ -1,22 +1,23 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
-import { ModelInput } from './components/ModelInput';
 import { ResultsDisplay } from './components/ResultsDisplay';
 import { CalculatorIcon } from './components/icons/CalculatorIcon';
 import { parseCsvData } from './utils/csvParser';
 import { analyzeData, AnalysisResult } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, ProbabilityModel, VariableDef } from './types';
-import { cartesianProduct } from './utils/mathUtils';
+import { CsvData, ModelDef, VariableDef, AnalysisOptions } from './types';
+import { ModelsManager } from './components/ModelsManager';
+import { AnalysisOptions as AnalysisOptionsComponent } from './components/AnalysisOptions';
 
 export default function App() {
   const [csvString, setCsvString] = useState<string>('');
-  const [modelString, setModelString] = useState<string>('');
-  const [modelError, setModelError] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelDef[]>([]);
+  const [templateVariables, setTemplateVariables] = useState<VariableDef[]>([]);
   
-  // State for the new model builder
-  const [variables, setVariables] = useState<VariableDef[]>([]);
-  const [probabilities, setProbabilities] = useState<Record<string, number>>({});
+  const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({
+    runMarkovOrderTest: false,
+    runTimeHomogeneityTest: false,
+  });
 
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
@@ -24,72 +25,26 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Effect to automatically detect variables from CSV input
+  // Effect to automatically detect variables from CSV to use as a template for new models
   useEffect(() => {
-    const data = parseCsvData(csvString);
-    const headers = data.headers;
-
-    setVariables(currentVariables => {
-        const currentHeaders = currentVariables.map(v => v.name);
-        if (headers.join(',') === currentHeaders.join(',')) {
-            return currentVariables;
-        }
-
-        if (headers.length === 0) {
-            setProbabilities({});
-            return [];
-        }
-        
-        const oldVariablesMap = new Map(currentVariables.map(v => [v.name, v]));
-        const newVariables = headers.map(header => ({
-            name: header,
-            states: oldVariablesMap.get(header)?.states || '',
-        }));
-
-        setProbabilities({});
-        return newVariables;
-    });
+    try {
+      const data = parseCsvData(csvString);
+      const headers = data.headers;
+      
+      if (headers.length === 0) {
+        setTemplateVariables([]);
+        return;
+      }
+      
+      const newVariables = headers.map(header => ({
+          name: header,
+          states: '',
+      }));
+      setTemplateVariables(newVariables);
+    } catch (e) {
+      // Ignore parsing errors during typing
+    }
   }, [csvString]);
-
-  // Effect to sync model builder state with the internal modelString
-  useEffect(() => {
-    if (variables.some(v => !v.name || !v.states)) {
-      setModelString('');
-      setModelError(null);
-      return;
-    }
-    
-    const stateSpaces = variables.map(v => v.states.split(',').map(s => s.trim()).filter(Boolean));
-    if (stateSpaces.some(ss => ss.length === 0)) {
-      setModelString('');
-      setModelError(null);
-      return;
-    }
-
-    const allCombinations = cartesianProduct(...stateSpaces);
-    
-    let totalProb = 0;
-    const model: ProbabilityModel = allCombinations.map(combo => {
-      const key = combo.join('|');
-      const probability = probabilities[key] || 0;
-      totalProb += probability;
-      const states: Record<string, string | number> = {};
-      variables.forEach((v, i) => {
-        const stateValue = combo[i];
-        states[v.name] = isNaN(Number(stateValue)) ? stateValue : Number(stateValue);
-      });
-      return { states, probability };
-    });
-
-    // Check for probability sum (with a small tolerance for floating point errors)
-    if (Math.abs(totalProb - 1.0) > 0.0001 && totalProb > 0) {
-        setModelError(`Probabilities sum to ${totalProb.toFixed(4)}, but should sum to 1.`);
-    } else {
-        setModelError(null);
-    }
-
-    setModelString(JSON.stringify(model));
-  }, [variables, probabilities]);
 
 
   const handleAnalyze = useCallback(async () => {
@@ -102,22 +57,25 @@ export default function App() {
       if (!csvString.trim()) {
         throw new Error('Dataset cannot be empty.');
       }
-      if (modelError) {
-        throw new Error('Model is not valid. Please fix it before analyzing.');
+      
+      const modelsWithErrors = models.filter(m => m.error);
+      if (modelsWithErrors.length > 0) {
+        throw new Error(`Model '${modelsWithErrors[0].name}' is not valid. Please fix it before analyzing.`);
       }
 
       const data: CsvData = parseCsvData(csvString);
       if (data.headers.length === 0 || data.rows.length === 0) {
         throw new Error('Invalid or empty dataset provided.');
       }
+      
+      const parsedModels = models
+        .filter(m => m.modelString.trim() && m.modelString.trim() !== '[]')
+        .map(m => ({
+          name: m.name,
+          model: JSON.parse(m.modelString)
+        }));
 
-      let model: ProbabilityModel | null = null;
-      // Use the generated model string if it's not empty/just an empty array
-      if (modelString.trim() && modelString.trim() !== '[]') {
-        model = JSON.parse(modelString);
-      }
-
-      const results = analyzeData(data, model);
+      const results = analyzeData(data, parsedModels, analysisOptions);
       setAnalysisResult(results);
 
       // Get explanation from Gemini service
@@ -129,7 +87,9 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [csvString, modelString, modelError]);
+  }, [csvString, models, analysisOptions]);
+
+  const hasAnyInvalidModel = models.some(m => !!m.error);
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
@@ -139,25 +99,27 @@ export default function App() {
             Stochastic Process Analyzer
           </h1>
           <p className="mt-4 text-lg text-gray-400">
-            Evaluate datasets against probability models with advanced stochastic metrics.
+            Evaluate datasets against multiple probability models with advanced stochastic metrics.
           </p>
         </header>
 
         <div className="space-y-8">
           <DataInput value={csvString} onChange={setCsvString} />
-          <ModelInput 
-            variables={variables}
-            setVariables={setVariables}
-            probabilities={probabilities}
-            setProbabilities={setProbabilities}
-            error={modelError}
+          <ModelsManager 
+            models={models}
+            setModels={setModels}
+            templateVariables={templateVariables}
+          />
+          <AnalysisOptionsComponent
+            options={analysisOptions}
+            setOptions={setAnalysisOptions}
           />
         </div>
 
         <div className="text-center mt-10">
           <button
             onClick={handleAnalyze}
-            disabled={isLoading || !csvString.trim() || !!modelError}
+            disabled={isLoading || !csvString.trim() || hasAnyInvalidModel}
             className="inline-flex items-center justify-center px-8 py-4 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105"
           >
             {isLoading ? (
