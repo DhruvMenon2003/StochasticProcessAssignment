@@ -16,9 +16,8 @@ export const VariableDefInput: React.FC<VariableDefInputProps> = ({ variable, on
         <input
           type="text"
           value={variable.name}
-          onChange={(e) => onChange({ ...variable, name: e.target.value })}
-          placeholder="e.g., VarX"
-          className="w-full p-2 bg-gray-800 text-gray-300 border border-gray-600 rounded-md focus:ring-1 focus:ring-teal-500 focus:border-teal-500 transition-colors text-sm"
+          readOnly
+          className="w-full p-2 bg-gray-700/50 text-gray-400 border border-gray-600 rounded-md focus:ring-0 focus:outline-none cursor-default text-sm"
         />
       </div>
       <div>

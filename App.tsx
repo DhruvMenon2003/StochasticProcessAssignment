@@ -9,18 +9,13 @@ import { getAnalysisExplanation } from './services/geminiService';
 import { CsvData, ProbabilityModel, VariableDef } from './types';
 import { cartesianProduct } from './utils/mathUtils';
 
-const defaultVariables: VariableDef[] = [
-  { name: 'VarX', states: 'A, B, C' },
-  { name: 'VarY', states: '1, 2' },
-];
-
 export default function App() {
   const [csvString, setCsvString] = useState<string>('');
   const [modelString, setModelString] = useState<string>('');
   const [modelError, setModelError] = useState<string | null>(null);
   
   // State for the new model builder
-  const [variables, setVariables] = useState<VariableDef[]>(defaultVariables);
+  const [variables, setVariables] = useState<VariableDef[]>([]);
   const [probabilities, setProbabilities] = useState<Record<string, number>>({});
 
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -28,6 +23,33 @@ export default function App() {
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Effect to automatically detect variables from CSV input
+  useEffect(() => {
+    const data = parseCsvData(csvString);
+    const headers = data.headers;
+
+    setVariables(currentVariables => {
+        const currentHeaders = currentVariables.map(v => v.name);
+        if (headers.join(',') === currentHeaders.join(',')) {
+            return currentVariables;
+        }
+
+        if (headers.length === 0) {
+            setProbabilities({});
+            return [];
+        }
+        
+        const oldVariablesMap = new Map(currentVariables.map(v => [v.name, v]));
+        const newVariables = headers.map(header => ({
+            name: header,
+            states: oldVariablesMap.get(header)?.states || '',
+        }));
+
+        setProbabilities({});
+        return newVariables;
+    });
+  }, [csvString]);
 
   // Effect to sync model builder state with the internal modelString
   useEffect(() => {
