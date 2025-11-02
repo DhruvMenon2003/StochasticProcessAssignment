@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 // Fix: Import VariableDef to be used in handler function types.
 import { ModelDef, ProbabilityModel, VariableDef } from '../types';
@@ -39,7 +40,8 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
       const states: Record<string, string | number> = {};
       model.variables.forEach((v, i) => {
         const stateValue = combo[i];
-        states[v.name] = isNaN(Number(stateValue)) ? stateValue : Number(stateValue);
+        // FIX: Use String(stateValue) to handle `unknown` type. `stateValue` alone is not assignable to `string | number`.
+        states[v.name] = isNaN(Number(stateValue)) ? String(stateValue) : Number(stateValue);
       });
       return { states, probability };
     });

@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AnalysisResult } from '../services/stochasticService';
 
@@ -19,8 +20,9 @@ export const AdvancedAnalysisDisplay: React.FC<{ results: AnalysisResult }> = ({
                 {Object.entries(timeHomogeneityTest).map(([variable, result]) => (
                     <div key={variable} className="flex justify-between items-center bg-gray-800 p-2 rounded-md">
                         <span className="font-mono text-gray-400">{variable}:</span>
-                        <span className={`font-semibold px-2 py-1 rounded-full text-xs ${result.isHomogeneous ? 'bg-green-800/70 text-green-300' : 'bg-yellow-800/70 text-yellow-300'}`}>
-                            {result.isHomogeneous ? 'Homogeneous' : 'Non-Homogeneous'}
+                        {/* FIX: Cast `result` to access `isHomogeneous` property, as it's inferred as `unknown`. */}
+                        <span className={`font-semibold px-2 py-1 rounded-full text-xs ${(result as any).isHomogeneous ? 'bg-green-800/70 text-green-300' : 'bg-yellow-800/70 text-yellow-300'}`}>
+                            {(result as any).isHomogeneous ? 'Homogeneous' : 'Non-Homogeneous'}
                         </span>
                     </div>
                 ))}
@@ -33,7 +35,8 @@ export const AdvancedAnalysisDisplay: React.FC<{ results: AnalysisResult }> = ({
             <h4 className="font-semibold text-lg text-gray-300 mb-3">Self-Dependence (1st Order)</h4>
             <div className="space-y-2 text-sm">
                 {Object.entries(markovOrderTest).map(([variable, results]) => (
-                    results.map(result => (
+                    // FIX: Cast `results` to an array to use `.map`, as it's inferred as `unknown`.
+                    (results as { order: number; isMarkovian: boolean }[]).map(result => (
                         <div key={`${variable}-${result.order}`} className="flex justify-between items-center bg-gray-800 p-2 rounded-md">
                             <span className="font-mono text-gray-400">{variable}:</span>
                             <span className={`font-semibold px-2 py-1 rounded-full text-xs ${result.isMarkovian ? 'bg-blue-800/70 text-blue-300' : 'bg-gray-700 text-gray-300'}`}>

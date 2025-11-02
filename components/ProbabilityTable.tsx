@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { VariableDef } from '../types';
 import { cartesianProduct } from '../utils/mathUtils';
@@ -24,7 +25,9 @@ export const ProbabilityTable: React.FC<ProbabilityTableProps> = ({
     }));
   };
   
-  const totalProbability = Object.values(probabilities).reduce((sum, prob) => sum + (prob || 0), 0);
+  // Fix: Switched from Object.values to Object.keys to prevent type inference issues where probability values were treated as 'unknown'.
+  // This resolves errors in both the summation (line 30) and the subsequent .toFixed() call (line 70).
+  const totalProbability = Object.keys(probabilities).reduce((sum, key) => sum + (probabilities[key] || 0), 0);
 
   return (
     <div className="space-y-3">

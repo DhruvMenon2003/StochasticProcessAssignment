@@ -1,4 +1,4 @@
-import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult } from '../types';
+import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable } from '../types';
 
 // --- Interfaces for analysis results ---
 export interface MarkovAnalysis {
@@ -140,7 +140,6 @@ const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => 
 
         if (pVal > 0) {
             // Use epsilon for qVal if it's zero, to avoid infinity.
-            // This is inspired by the MATLAB function's recommendation.
             const qValAdjusted = qVal === 0 ? epsilon : qVal;
             divergence += pVal * Math.log2(pVal / qValAdjusted);
         }
@@ -168,9 +167,68 @@ const getMutualInformation = (jointPMF: Distribution, marginals: { [key: string]
     return mi;
 };
 
+// --- Conditional Distribution ---
+const getConditionalDistributions = (jointPMF: Distribution, marginals: { [key: string]: Distribution }, headers: string[]): ConditionalDistributionTable[] => {
+    if (headers.length < 2) {
+        return [];
+    }
+
+    const conditionals: ConditionalDistributionTable[] = [];
+    
+    // Get sorted states for each variable to ensure consistent ordering
+    const allStates: { [key: string]: (string | number)[] } = {};
+    headers.forEach(h => {
+        allStates[h] = Object.keys(marginals[h]).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+    });
+
+    for (let i = 0; i < headers.length; i++) { // Target variable
+        for (let j = 0; j < headers.length; j++) { // Conditioned variable
+            if (i === j) continue;
+
+            const targetVariable = headers[i];
+            const conditionedVariable = headers[j];
+
+            const targetStates = allStates[targetVariable];
+            const conditionedStates = allStates[conditionedVariable];
+
+            const matrix: number[][] = [];
+
+            for (const condState of conditionedStates) {
+                const row: number[] = [];
+                const p_conditioned = marginals[conditionedVariable][condState];
+
+                for (const targetState of targetStates) {
+                    // Calculate P(target=targetState, conditioned=condState) by summing over all other variables
+                    let p_joint_pair = 0;
+                    for (const fullJointKey in jointPMF) {
+                        const fullStates = fullJointKey.split('|');
+                        // Use '==' for type coercion as states can be number or string
+                        if (fullStates[i] == targetState && fullStates[j] == condState) {
+                            p_joint_pair += jointPMF[fullJointKey];
+                        }
+                    }
+
+                    const conditionalProb = (p_conditioned > 1e-9) ? p_joint_pair / p_conditioned : 0;
+                    row.push(conditionalProb);
+                }
+                matrix.push(row);
+            }
+
+            conditionals.push({
+                targetVariable,
+                conditionedVariable,
+                targetStates,
+                conditionedStates,
+                matrix
+            });
+        }
+    }
+    return conditionals;
+};
+
 // --- Markov Analysis Functions ---
 const getTransitionMatrix = (series: (string | number)[]): { states: (string | number)[], matrix: number[][] } => {
-    const states = Array.from(new Set(series)).sort((a,b) => String(a).localeCompare(String(b)));
+    const states = Array.from(new Set(series)).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
     const stateIndex = new Map(states.map((s, i) => [s, i]));
     const n = states.length;
     const counts = Array(n).fill(0).map(() => Array(n).fill(0));
@@ -299,6 +357,8 @@ export function analyzeData(
       const singleVarDist = empiricalMarginals[singleVarHeader];
       empiricalDists.moments = calculateMoments(singleVarDist);
       empiricalDists.cmf = calculateCmf(singleVarDist);
+  } else {
+      empiricalDists.conditionals = getConditionalDistributions(empiricalJoint, empiricalMarginals, data.headers);
   }
 
   let result: AnalysisResult = { 
@@ -347,6 +407,9 @@ export function analyzeData(
         const modelJoint = getModelJointPMF(model, data.headers);
         const modelMarginals = getMarginals(modelJoint, data.headers);
         const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
+        if (!isSingleVariable) {
+            modelDists.conditionals = getConditionalDistributions(modelJoint, modelMarginals, data.headers);
+        }
 
         const empiricalMetricDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;
         const modelMetricDist = isSingleVariable ? modelDists.marginals[data.headers[0]] : modelJoint;

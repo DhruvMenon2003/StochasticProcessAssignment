@@ -39,9 +39,18 @@ export interface AnalysisOptions {
 
 // --- Analysis Result Types ---
 
+export interface ConditionalDistributionTable {
+  targetVariable: string;
+  conditionedVariable: string;
+  targetStates: (string | number)[];
+  conditionedStates: (string | number)[];
+  matrix: number[][];
+}
+
 export interface CalculatedDistributions {
   joint: Distribution;
   marginals: { [key: string]: Distribution };
+  conditionals?: ConditionalDistributionTable[];
   moments?: { mean: number; variance: number }; // For single variable
   cmf?: Distribution; // For single variable
 }

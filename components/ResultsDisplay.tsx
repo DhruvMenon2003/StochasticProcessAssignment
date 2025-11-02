@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { AnalysisResult } from '../services/stochasticService';
 import { MetricCard } from './MetricCard';
@@ -6,6 +7,7 @@ import { MarkovDisplay } from './MarkovDisplay';
 import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
 import { ModelComparisonTable } from './ModelComparisonTable';
 import { SingleVariableDisplay } from './SingleVariableDisplay';
+import { ConditionalDistributionDisplay } from './ConditionalDistributionDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -30,7 +32,8 @@ const JointDistributionTable: React.FC<{ dist: Distribution; title: string; head
                           return (
                               <tr key={key} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50 transition-colors">
                                   {states.map((s, i) => <td key={i} className="p-3">{s}</td>)}
-                                  <td className="p-3">{value.toFixed(4)}</td>
+                                  {/* FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`. */}
+                                  <td className="p-3">{(value as number).toFixed(4)}</td>
                               </tr>
                           );
                       })}
@@ -47,7 +50,8 @@ const MarginalDistributionDisplay: React.FC<{ dist: Distribution; title: string;
           <h4 className="font-semibold text-lg text-gray-300 mb-2">{title}</h4>
           <div className="bg-gray-800 p-3 rounded-md text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto border border-gray-700">
               {Object.entries(dist)
-                  .map(([key, value]) => `${key}: ${value.toFixed(4)}`)
+                  // FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`.
+                  .map(([key, value]) => `${key}: ${(value as number).toFixed(4)}`)
                   .join('\n')}
           </div>
       </div>
@@ -110,6 +114,17 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
         </div>
       </div>
 
+      {results.empirical.conditionals && results.empirical.conditionals.length > 0 && (
+        <div>
+          <h3 className="text-2xl font-bold text-gray-100 mb-4">Empirical Conditional Distributions</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {results.empirical.conditionals.map((dist, index) => (
+              <ConditionalDistributionDisplay key={index} distribution={dist} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {results.modelResults?.map(modelResult => (
          <div key={modelResult.name}>
           <h3 className="text-2xl font-bold text-gray-100 mb-4">Model Distributions: <span className="text-teal-300">{modelResult.name}</span></h3>
@@ -123,6 +138,16 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
               </React.Fragment>
             ))}
           </div>
+           {modelResult.distributions.conditionals && modelResult.distributions.conditionals.length > 0 && (
+              <div className="mt-8">
+                <h4 className="text-xl font-bold text-gray-200 mb-4">Model Conditional Distributions</h4>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {modelResult.distributions.conditionals.map((dist, index) => (
+                    <ConditionalDistributionDisplay key={index} distribution={dist} />
+                  ))}
+                </div>
+              </div>
+            )}
         </div>
       ))}
      

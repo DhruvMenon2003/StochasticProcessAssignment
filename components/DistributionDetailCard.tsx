@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Distribution } from '../types';
 import { MetricCard } from './MetricCard';
@@ -17,7 +18,8 @@ const DistDisplay: React.FC<{ dist: Distribution; title: string; }> = ({ dist, t
       <h4 className="font-semibold text-base text-gray-300 mb-2">{title}</h4>
       <div className="bg-gray-900/50 p-3 rounded-md text-sm font-mono whitespace-pre-wrap max-h-40 overflow-y-auto border border-gray-700">
         {sortedEntries
-            .map(([key, value]) => `${key}: ${value.toFixed(4)}`)
+            // FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`.
+            .map(([key, value]) => `${key}: ${(value as number).toFixed(4)}`)
             .join('\n')}
       </div>
     </div>
