@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { ModelDef, VariableDef } from '../types';
 import { ModelEditor } from './ModelEditor';
 import { PlusIcon } from './icons/PlusIcon';
@@ -24,13 +24,13 @@ export const ModelsManager: React.FC<ModelsManagerProps> = ({ models, setModels,
     setModels(prev => [...prev, newModel]);
   };
 
-  const handleUpdateModel = (id: string, updatedModel: Partial<ModelDef>) => {
+  const handleUpdateModel = useCallback((id: string, updatedModel: Partial<ModelDef>) => {
     setModels(prev => prev.map(m => m.id === id ? { ...m, ...updatedModel } : m));
-  };
+  }, [setModels]);
 
-  const handleDeleteModel = (id: string) => {
+  const handleDeleteModel = useCallback((id: string) => {
     setModels(prev => prev.filter(m => m.id !== id));
-  };
+  }, [setModels]);
 
   return (
     <div className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
@@ -47,8 +47,8 @@ export const ModelsManager: React.FC<ModelsManagerProps> = ({ models, setModels,
           <ModelEditor
             key={model.id}
             model={model}
-            onUpdate={(update) => handleUpdateModel(model.id, update)}
-            onDelete={() => handleDeleteModel(model.id)}
+            onUpdate={handleUpdateModel}
+            onDelete={handleDeleteModel}
           />
         ))}
       </div>

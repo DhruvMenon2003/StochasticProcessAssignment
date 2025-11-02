@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 // Fix: Import VariableDef to be used in handler function types.
 import { ModelDef, ProbabilityModel, VariableDef } from '../types';
@@ -10,8 +9,8 @@ import { PlusIcon } from './icons/PlusIcon';
 
 interface ModelEditorProps {
   model: ModelDef;
-  onUpdate: (updatedModel: Partial<ModelDef>) => void;
-  onDelete: () => void;
+  onUpdate: (id: string, updatedModel: Partial<ModelDef>) => void;
+  onDelete: (id: string) => void;
 }
 
 export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDelete }) => {
@@ -20,13 +19,13 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
   // Effect to sync model builder state with the parent modelString
   useEffect(() => {
     if (model.variables.some(v => !v.name || !v.states)) {
-      onUpdate({ modelString: '', error: null });
+      onUpdate(model.id, { modelString: '', error: null });
       return;
     }
     
     const stateSpaces = model.variables.map(v => v.states.split(',').map(s => s.trim()).filter(Boolean));
     if (stateSpaces.some(ss => ss.length === 0)) {
-      onUpdate({ modelString: '', error: null });
+      onUpdate(model.id, { modelString: '', error: null });
       return;
     }
 
@@ -51,23 +50,23 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
         error = `Probabilities sum to ${totalProb.toFixed(4)}, but should sum to 1.`;
     }
     
-    onUpdate({
+    onUpdate(model.id, {
         modelString: JSON.stringify(modelDef),
         error: error
     });
 
-  }, [model.variables, model.probabilities, onUpdate]);
+  }, [model.id, model.variables, model.probabilities, onUpdate]);
 
   // Fix: Create handlers to resolve the SetStateAction before calling onUpdate.
   // This correctly handles cases where the state update is a function.
   const handleSetVariables = (vars: React.SetStateAction<VariableDef[]>) => {
     const newVariables = typeof vars === 'function' ? vars(model.variables) : vars;
-    onUpdate({ variables: newVariables, probabilities: {} });
+    onUpdate(model.id, { variables: newVariables, probabilities: {} });
   };
 
   const handleSetProbabilities = (probs: React.SetStateAction<Record<string, number>>) => {
     const newProbabilities = typeof probs === 'function' ? probs(model.probabilities) : probs;
-    onUpdate({ probabilities: newProbabilities });
+    onUpdate(model.id, { probabilities: newProbabilities });
   };
 
   return (
@@ -79,11 +78,11 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
         <input
           type="text"
           value={model.name}
-          onChange={(e) => onUpdate({ name: e.target.value })}
+          onChange={(e) => onUpdate(model.id, { name: e.target.value })}
           className="mx-2 flex-grow p-1 bg-transparent text-lg font-semibold text-gray-200 focus:ring-0 focus:outline-none focus:bg-gray-700/50 rounded-md"
         />
         <button
-          onClick={onDelete}
+          onClick={() => onDelete(model.id)}
           className="p-2 text-gray-500 hover:text-red-400 hover:bg-red-900/30 rounded-full transition-colors"
           aria-label="Delete model"
         >

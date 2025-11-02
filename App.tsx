@@ -46,9 +46,10 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'unsaved' | 'saved'>('idle');
   const saveTimeoutRef = useRef<number | null>(null);
   const statusTimeoutRef = useRef<number | null>(null);
+  const isInitialMount = useRef(true);
 
   // Effect to automatically detect variables from CSV to use as a template for new models
   useEffect(() => {
@@ -71,8 +72,13 @@ export default function App() {
     }
   }, [csvString]);
 
-  // --- AUTOSAVE EFFECT ---
+  // --- REVISED AUTOSAVE EFFECT ---
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+
     setSaveStatus('unsaved');
     
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -80,27 +86,33 @@ export default function App() {
 
     saveTimeoutRef.current = window.setTimeout(() => {
       setSaveStatus('saving');
-      try {
-        const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
-          id,
-          name,
-          variables,
-          probabilities,
-        }));
-        const sessionData = {
-          csvString,
-          models: modelsToSave,
-          analysisOptions,
-        };
-        localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
-        
-        setSaveStatus('saved');
-        statusTimeoutRef.current = window.setTimeout(() => setSaveStatus('saved'), 2000); // Keep 'saved' message for 2s
+      
+      // Short delay to ensure 'Saving...' is rendered before state changes again
+      setTimeout(() => {
+        try {
+          const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
+            id,
+            name,
+            variables,
+            probabilities,
+          }));
+          const sessionData = {
+            csvString,
+            models: modelsToSave,
+            analysisOptions,
+          };
+          localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
+          
+          setSaveStatus('saved');
 
-      } catch (e) {
-        console.error("Could not autosave session:", e);
-        // Handle potential error state if needed
-      }
+          // After 2 seconds, revert to idle state (hide the message)
+          statusTimeoutRef.current = window.setTimeout(() => setSaveStatus('idle'), 2000);
+
+        } catch (e) {
+          console.error("Could not autosave session:", e);
+          setSaveStatus('idle'); // Revert to idle on error
+        }
+      }, 100);
     }, 1500); // Debounce time: 1.5 seconds
 
     return () => {
@@ -183,9 +195,10 @@ export default function App() {
         </header>
 
         <div className="flex justify-end items-center gap-4 mb-8 border-b border-gray-700 pb-4">
-           <div className="text-gray-400 text-sm italic transition-opacity duration-300 w-28 text-right">
+           <div className="text-gray-400 text-sm italic transition-opacity duration-300 w-36 text-right">
+            {saveStatus === 'unsaved' && <span className="text-yellow-400">Unsaved changes</span>}
             {saveStatus === 'saving' && 'Saving...'}
-            {saveStatus === 'saved' && 'All changes saved.'}
+            {saveStatus === 'saved' && <span className="text-green-400">All changes saved</span>}
           </div>
           <button
             onClick={handleNewSession}
