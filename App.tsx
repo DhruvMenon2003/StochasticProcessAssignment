@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { DataInput } from './components/DataInput';
 import { ResultsDisplay } from './components/ResultsDisplay';
 import { CalculatorIcon } from './components/icons/CalculatorIcon';
@@ -8,39 +8,47 @@ import { getAnalysisExplanation } from './services/geminiService';
 import { CsvData, ModelDef, VariableDef, AnalysisOptions } from './types';
 import { ModelsManager } from './components/ModelsManager';
 import { AnalysisOptions as AnalysisOptionsComponent } from './components/AnalysisOptions';
-import { SessionSplash } from './components/SessionSplash';
-import { SaveIcon } from './components/icons/SaveIcon';
 import { NewFileIcon } from './components/icons/NewFileIcon';
 
+// Helper to load session from localStorage
+const loadSession = () => {
+  try {
+    const saved = localStorage.getItem('stochastic-session');
+    return saved ? JSON.parse(saved) : null;
+  } catch (e) {
+    console.error("Could not parse saved session:", e);
+    return null;
+  }
+};
+
 export default function App() {
-  const [csvString, setCsvString] = useState<string>('');
-  const [models, setModels] = useState<ModelDef[]>([]);
+  const [csvString, setCsvString] = useState<string>(() => loadSession()?.csvString || '');
+  const [models, setModels] = useState<ModelDef[]>(() => {
+    const sessionData = loadSession();
+    if (!sessionData || !sessionData.models) return [];
+    // Re-hydrate models, setting transient state to default values.
+    return sessionData.models.map((m: Omit<ModelDef, 'error' | 'modelString'>) => ({ 
+        ...m, 
+        error: null, 
+        modelString: '' 
+    }));
+  });
   const [templateVariables, setTemplateVariables] = useState<VariableDef[]>([]);
-  const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>({
-    runMarkovOrderTest: false,
-    runTimeHomogeneityTest: false,
+  const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>(() => {
+      const sessionData = loadSession();
+      return sessionData?.analysisOptions || {
+        runMarkovOrderTest: false,
+        runTimeHomogeneityTest: false,
+      };
   });
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [sessionStatus, setSessionStatus] = useState<'loading' | 'choose' | 'active'>('loading');
-
-  // Check for saved session on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('stochastic-session');
-      if (saved) {
-        setSessionStatus('choose');
-      } else {
-        setSessionStatus('active');
-      }
-    } catch (e) {
-      console.error("Could not access local storage:", e);
-      setSessionStatus('active'); // Default to active if storage fails
-    }
-  }, []);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
+  const saveTimeoutRef = useRef<number | null>(null);
+  const statusTimeoutRef = useRef<number | null>(null);
 
   // Effect to automatically detect variables from CSV to use as a template for new models
   useEffect(() => {
@@ -63,48 +71,44 @@ export default function App() {
     }
   }, [csvString]);
 
-  const handleSaveSession = useCallback(() => {
-    try {
-      // Persist only the necessary data, not transient state.
-      const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
-        id,
-        name,
-        variables,
-        probabilities,
-      }));
-      const sessionData = {
-        csvString,
-        models: modelsToSave,
-      };
-      localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
-      alert('Session saved successfully!');
-    } catch (e) {
-      console.error("Could not save session:", e);
-      alert('Error: Could not save session.');
-    }
-  }, [csvString, models]);
+  // --- AUTOSAVE EFFECT ---
+  useEffect(() => {
+    setSaveStatus('unsaved');
+    
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
 
-  const handleLoadSession = useCallback(() => {
-    try {
-      const saved = localStorage.getItem('stochastic-session');
-      if (saved) {
-        const sessionData = JSON.parse(saved);
-        setCsvString(sessionData.csvString || '');
-        // Re-hydrate models, setting transient state to default values.
-        const loadedModels = sessionData.models.map((m: Omit<ModelDef, 'error' | 'modelString'>) => ({ 
-            ...m, 
-            error: null, 
-            modelString: '' 
+    saveTimeoutRef.current = window.setTimeout(() => {
+      setSaveStatus('saving');
+      try {
+        const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
+          id,
+          name,
+          variables,
+          probabilities,
         }));
-        setModels(loadedModels);
+        const sessionData = {
+          csvString,
+          models: modelsToSave,
+          analysisOptions,
+        };
+        localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
+        
+        setSaveStatus('saved');
+        statusTimeoutRef.current = window.setTimeout(() => setSaveStatus('saved'), 2000); // Keep 'saved' message for 2s
+
+      } catch (e) {
+        console.error("Could not autosave session:", e);
+        // Handle potential error state if needed
       }
-    } catch (e) {
-      console.error("Could not load session:", e);
-      alert('Error: Could not load session.');
-    } finally {
-      setSessionStatus('active');
-    }
-  }, []);
+    }, 1500); // Debounce time: 1.5 seconds
+
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+    };
+  }, [csvString, models, analysisOptions]);
+
 
   const handleNewSession = useCallback(() => {
     // Clear state
@@ -114,13 +118,11 @@ export default function App() {
     setExplanation(null);
     setError(null);
     setAnalysisOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
-    // Clear storage
+    // Clear storage, which will trigger autosave for the new empty state
     try {
       localStorage.removeItem('stochastic-session');
     } catch (e) {
       console.error("Could not clear session from storage:", e);
-    } finally {
-      setSessionStatus('active');
     }
   }, []);
 
@@ -168,18 +170,6 @@ export default function App() {
 
   const hasAnyInvalidModel = models.some(m => !!m.error);
 
-  if (sessionStatus === 'loading') {
-    return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <h2 className="text-2xl text-gray-400">Loading...</h2>
-      </div>
-    );
-  }
-
-  if (sessionStatus === 'choose') {
-    return <SessionSplash onRestore={handleLoadSession} onNew={handleNewSession} />;
-  }
-
   return (
     <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
       <main className="container mx-auto p-4 md:p-8">
@@ -193,13 +183,10 @@ export default function App() {
         </header>
 
         <div className="flex justify-end items-center gap-4 mb-8 border-b border-gray-700 pb-4">
-          <button
-            onClick={handleSaveSession}
-            className="inline-flex items-center justify-center px-4 py-2 bg-blue-600/80 text-white font-semibold rounded-md shadow-sm hover:bg-blue-700 disabled:bg-gray-600 transition-colors duration-200"
-          >
-            <SaveIcon className="mr-2 h-5 w-5" />
-            Save Session
-          </button>
+           <div className="text-gray-400 text-sm italic transition-opacity duration-300 w-28 text-right">
+            {saveStatus === 'saving' && 'Saving...'}
+            {saveStatus === 'saved' && 'All changes saved.'}
+          </div>
           <button
             onClick={handleNewSession}
             className="inline-flex items-center justify-center px-4 py-2 bg-gray-700/80 text-white font-semibold rounded-md shadow-sm hover:bg-gray-600 transition-colors duration-200"
@@ -230,7 +217,7 @@ export default function App() {
           >
             {isLoading ? (
               <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
