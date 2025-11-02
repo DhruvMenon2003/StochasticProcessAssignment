@@ -8,6 +8,7 @@ import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
 import { ModelComparisonTable } from './ModelComparisonTable';
 import { SingleVariableDisplay } from './SingleVariableDisplay';
 import { ConditionalDistributionDisplay } from './ConditionalDistributionDisplay';
+import { DependenceAnalysisDisplay } from './DependenceAnalysisDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -83,20 +84,18 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
            <ModelComparisonTable modelResults={results.modelResults} bestModelName={results.bestModelName} />
         </div>
       )}
+
+      {results.dependenceAnalysis && results.dependenceAnalysis.length > 0 && (
+        <div>
+           <h3 className="text-2xl font-bold text-gray-100 mb-4">Stochastic Dependence Evaluation</h3>
+            <DependenceAnalysisDisplay analysis={results.dependenceAnalysis} />
+        </div>
+      )}
       
       {(results.timeHomogeneityTest || results.markovOrderTest) && (
         <div>
           <h3 className="text-2xl font-bold text-gray-100 mb-4">Advanced Analysis</h3>
           <AdvancedAnalysisDisplay results={results} />
-        </div>
-      )}
-
-      {results.dependence && results.dependence.mutualInformation !== null && (
-        <div>
-           <h3 className="text-2xl font-bold text-gray-100 mb-4">Dependence & Information</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <MetricCard title="Mutual Information" value={results.dependence.mutualInformation.toFixed(5)} description="Measures the mutual dependence between the two variables. 0 implies independence; higher values mean stronger dependence." />
-            </div>
         </div>
       )}
 

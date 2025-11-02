@@ -1,4 +1,4 @@
-import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable } from '../types';
+import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics } from '../types';
 
 // --- Interfaces for analysis results ---
 export interface MarkovAnalysis {
@@ -32,16 +32,35 @@ export interface AnalysisResult {
   empirical: CalculatedDistributions;
   modelResults?: ModelAnalysisResult[];
   bestModelName?: string;
-  dependence?: {
+  dependence?: { // Note: this is now superseded by dependenceAnalysis but kept for single MI value
     mutualInformation: number | null;
   };
   markov?: MarkovResult;
   timeHomogeneityTest?: TimeHomogeneityResult;
   markovOrderTest?: MarkovOrderResult;
+  dependenceAnalysis?: DependenceAnalysisPair[];
 }
 
 // --- Helper Functions ---
 const getKeyFromStates = (states: (string | number)[]): string => states.join('|');
+
+const getCombinations = <T>(array: T[], k: number): T[][] => {
+    const result: T[][] = [];
+    function backtrack(combination: T[], start: number) {
+        if (combination.length === k) {
+            result.push([...combination]);
+            return;
+        }
+        for (let i = start; i < array.length; i++) {
+            combination.push(array[i]);
+            backtrack(combination, i + 1);
+            combination.pop();
+        }
+    }
+    backtrack([], 0);
+    return result;
+};
+
 
 const getJointPMF = (data: CsvData): Distribution => {
   const jointCounts: { [key: string]: number } = {};
@@ -147,19 +166,31 @@ const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => 
     return divergence;
 };
 
-const getMutualInformation = (jointPMF: Distribution, marginals: { [key: string]: Distribution }, headers: string[]): number | null => {
-    if (headers.length !== 2) return null; // MI is typically pairwise
-    const [h1, h2] = headers;
-    const m1 = marginals[h1];
-    const m2 = marginals[h2];
+const getPairwiseJointPMF = (fullJointPMF: Distribution, allHeaders: string[], pair: [string, string]): Distribution => {
+    const pairwisePMF: Distribution = {};
+    const [h1, h2] = pair;
+    const h1Index = allHeaders.indexOf(h1);
+    const h2Index = allHeaders.indexOf(h2);
+
+    for (const fullKey in fullJointPMF) {
+        const fullStates = fullKey.split('|');
+        const s1 = fullStates[h1Index];
+        const s2 = fullStates[h2Index];
+        const pairKey = getKeyFromStates([s1, s2]);
+        pairwisePMF[pairKey] = (pairwisePMF[pairKey] || 0) + fullJointPMF[fullKey];
+    }
+    return pairwisePMF;
+};
+
+const calculatePairwiseMutualInformation = (pairwiseJointPMF: Distribution, marginal1: Distribution, marginal2: Distribution): number => {
     let mi = 0;
-    for (const jointKey in jointPMF) {
+    for (const jointKey in pairwiseJointPMF) {
         const states = jointKey.split('|');
         const s1 = states[0];
         const s2 = states[1];
-        const p_xy = jointPMF[jointKey];
-        const p_x = m1[s1];
-        const p_y = m2[s2];
+        const p_xy = pairwiseJointPMF[jointKey];
+        const p_x = marginal1[s1];
+        const p_y = marginal2[s2];
         if (p_xy > 0 && p_x > 0 && p_y > 0) {
             mi += p_xy * Math.log2(p_xy / (p_x * p_y));
         }
@@ -338,6 +369,104 @@ const analyzeMarkovOrder = (series: (string | number)[], maxOrder: number = 1): 
     return results;
 };
 
+// --- Stochastic Dependence Analysis ---
+const createDistanceMatrix = (series: number[]): number[][] => {
+    const n = series.length;
+    const matrix: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+        for (let j = i; j < n; j++) {
+            const dist = Math.abs(series[i] - series[j]);
+            matrix[i][j] = dist;
+            matrix[j][i] = dist;
+        }
+    }
+    return matrix;
+};
+
+const doubleCenterMatrix = (matrix: number[][]): number[][] => {
+    const n = matrix.length;
+    if (n === 0) return [];
+    const rowMeans = matrix.map(row => row.reduce((a, b) => a + b, 0) / n);
+    const colMeans = Array(n).fill(0).map((_, j) => matrix.reduce((sum, row) => sum + row[j], 0) / n);
+    const totalMean = rowMeans.reduce((a, b) => a + b, 0) / n;
+
+    const centered: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            centered[i][j] = matrix[i][j] - rowMeans[i] - colMeans[j] + totalMean;
+        }
+    }
+    return centered;
+};
+
+const calculateDistanceCorrelation = (seriesX: (string | number)[], seriesY: (string | number)[]): number | null => {
+    const numericX = seriesX.map(Number);
+    const numericY = seriesY.map(Number);
+    if (numericX.some(isNaN) || numericY.some(isNaN)) {
+        return null;
+    }
+
+    const n = numericX.length;
+    if (n === 0) return null;
+
+    const distMatrixX = createDistanceMatrix(numericX);
+    const distMatrixY = createDistanceMatrix(numericY);
+
+    const centeredX = doubleCenterMatrix(distMatrixX);
+    const centeredY = doubleCenterMatrix(distMatrixY);
+
+    let dCovSq = 0;
+    let dVarXSq = 0;
+    let dVarYSq = 0;
+
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            dCovSq += centeredX[i][j] * centeredY[i][j];
+            dVarXSq += centeredX[i][j] * centeredX[i][j];
+            dVarYSq += centeredY[i][j] * centeredY[i][j];
+        }
+    }
+    
+    dCovSq /= (n * n);
+    dVarXSq /= (n * n);
+    dVarYSq /= (n * n);
+
+    if (dVarXSq <= 1e-9 || dVarYSq <= 1e-9) {
+        return 0;
+    }
+
+    const dCor = Math.sqrt(Math.max(0, dCovSq)) / Math.sqrt(Math.sqrt(dVarXSq) * Math.sqrt(dVarYSq));
+    return dCor;
+};
+
+const simulateDataFromJointPMF = (jointPMF: Distribution, headers: string[], numSamples: number): CsvData => {
+    const outcomes = Object.keys(jointPMF);
+    const probabilities = Object.values(jointPMF);
+  
+    const cumulativeProbs: number[] = [];
+    let cumulative = 0;
+    for (const p of probabilities) {
+      cumulative += p;
+      cumulativeProbs.push(cumulative);
+    }
+  
+    const simulatedRows: (string | number)[][] = [];
+    for (let i = 0; i < numSamples; i++) {
+      const rand = Math.random();
+      const outcomeIndex = cumulativeProbs.findIndex(cp => rand <= cp);
+      const outcomeKey = outcomes[outcomeIndex];
+      if (outcomeKey) {
+          const row = outcomeKey.split('|').map(cell => {
+               const trimmedCell = cell.trim();
+               return isNaN(Number(trimmedCell)) || trimmedCell === '' ? trimmedCell : Number(trimmedCell);
+          });
+          simulatedRows.push(row);
+      }
+    }
+  
+    return { headers, rows: simulatedRows };
+};
+
 
 // --- Main Analysis Function ---
 export function analyzeData(
@@ -367,10 +496,63 @@ export function analyzeData(
     empirical: empiricalDists 
   };
   
-  // Dependence analysis
-  result.dependence = {
-      mutualInformation: getMutualInformation(empiricalJoint, empiricalMarginals, data.headers)
-  };
+  // --- Stochastic Dependence analysis ---
+  const dependenceAnalyses: DependenceAnalysisPair[] = [];
+  if (data.headers.length >= 2) {
+      const headerPairs = getCombinations(data.headers, 2) as [string, string][];
+
+      // Populate legacy dependence object with first pair's MI
+      const firstPair = headerPairs[0];
+      const firstPairPMF = getPairwiseJointPMF(empiricalJoint, data.headers, firstPair);
+      result.dependence = {
+          mutualInformation: calculatePairwiseMutualInformation(firstPairPMF, empiricalMarginals[firstPair[0]], empiricalMarginals[firstPair[1]])
+      };
+      
+      for (const pair of headerPairs) {
+          const [h1, h2] = pair;
+          const h1Index = data.headers.indexOf(h1);
+          const h2Index = data.headers.indexOf(h2);
+
+          // --- Empirical Calculation ---
+          const pairwiseEmpiricalJoint = getPairwiseJointPMF(empiricalJoint, data.headers, pair);
+          const empiricalMI = calculatePairwiseMutualInformation(pairwiseEmpiricalJoint, empiricalMarginals[h1], empiricalMarginals[h2]);
+          const seriesX = data.rows.map(r => r[h1Index]);
+          const seriesY = data.rows.map(r => r[h2Index]);
+          const empiricalDC = calculateDistanceCorrelation(seriesX, seriesY);
+          
+          const empiricalMetrics: DependenceMetrics = {
+              mutualInformation: empiricalMI,
+              distanceCorrelation: empiricalDC,
+          };
+
+          // --- Model Calculations ---
+          const modelMetrics: ModelDependenceMetrics[] = models.map(({ name, model }) => {
+              const modelJoint = getModelJointPMF(model, data.headers);
+              const modelMarginals = getMarginals(modelJoint, data.headers);
+              const pairwiseModelJoint = getPairwiseJointPMF(modelJoint, data.headers, pair);
+              const modelMI = calculatePairwiseMutualInformation(pairwiseModelJoint, modelMarginals[h1], modelMarginals[h2]);
+
+              const simulatedData = simulateDataFromJointPMF(modelJoint, data.headers, data.rows.length);
+              const simSeriesX = simulatedData.rows.map(r => r[h1Index]);
+              const simSeriesY = simulatedData.rows.map(r => r[h2Index]);
+              const modelDC = calculateDistanceCorrelation(simSeriesX, simSeriesY);
+
+              return {
+                  modelName: name,
+                  mutualInformation: modelMI,
+                  distanceCorrelation: modelDC,
+              };
+          });
+
+          dependenceAnalyses.push({
+              variablePair: pair,
+              empiricalMetrics,
+              modelMetrics,
+          });
+      }
+  }
+  result.dependenceAnalysis = dependenceAnalyses;
+
   
   // Advanced analysis if requested
   if (options.runTimeHomogeneityTest) {

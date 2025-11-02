@@ -73,3 +73,18 @@ export interface ModelAnalysisResult {
     };
     wins?: number;
 }
+
+export interface DependenceMetrics {
+    mutualInformation: number | null;
+    distanceCorrelation: number | null;
+}
+
+export interface ModelDependenceMetrics extends DependenceMetrics {
+    modelName: string;
+}
+
+export interface DependenceAnalysisPair {
+    variablePair: [string, string];
+    empiricalMetrics: DependenceMetrics;
+    modelMetrics: ModelDependenceMetrics[];
+}
