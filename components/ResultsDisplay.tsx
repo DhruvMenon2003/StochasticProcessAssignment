@@ -16,6 +16,8 @@ interface ResultsDisplayProps {
 }
 
 const JointDistributionTable: React.FC<{ dist: Distribution; title: string; headers: string[] }> = ({ dist, title, headers }) => {
+  const sortedEntries = Object.entries(dist).sort(([keyA], [keyB]) => keyA.localeCompare(keyB, undefined, { numeric: true }));
+
   return (
       <div className="relative">
           <h4 className="font-semibold text-lg text-gray-300 mb-2">{title}</h4>
@@ -28,7 +30,7 @@ const JointDistributionTable: React.FC<{ dist: Distribution; title: string; head
                       </tr>
                   </thead>
                   <tbody>
-                      {Object.entries(dist).map(([key, value]) => {
+                      {sortedEntries.map(([key, value]) => {
                           const states = key.split('|');
                           return (
                               <tr key={key} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50 transition-colors">
@@ -51,6 +53,7 @@ const MarginalDistributionDisplay: React.FC<{ dist: Distribution; title: string;
           <h4 className="font-semibold text-lg text-gray-300 mb-2">{title}</h4>
           <div className="bg-gray-800 p-3 rounded-md text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto border border-gray-700">
               {Object.entries(dist)
+                  .sort(([keyA], [keyB]) => keyA.localeCompare(keyB, undefined, { numeric: true }))
                   // FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`.
                   .map(([key, value]) => `${key}: ${(value as number).toFixed(4)}`)
                   .join('\n')}
