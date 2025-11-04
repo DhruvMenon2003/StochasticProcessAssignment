@@ -1,4 +1,5 @@
-import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics } from '../types';
+import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics, ConditionalMomentsTable } from '../types';
+import { cartesianProduct } from '../utils/mathUtils';
 
 // --- Interfaces for analysis results ---
 export interface MarkovAnalysis {
@@ -66,9 +67,31 @@ const getJointPMF = (data: CsvData): Distribution => {
   const jointCounts: { [key: string]: number } = {};
   const totalRows = data.rows.length;
 
+  if (totalRows === 0) {
+    return {};
+  }
+  
+  // Find all unique states for each variable to define the complete state space, and sort them.
+  const uniqueStatesPerVariable = data.headers.map((_, colIndex) =>
+    Array.from(new Set(data.rows.map(row => row[colIndex])))
+        .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))
+  );
+  
+  const allPossibleStateCombinations = cartesianProduct(...uniqueStatesPerVariable);
+
+  // Initialize all possible outcomes with a count of 0
+  allPossibleStateCombinations.forEach(combo => {
+      const key = getKeyFromStates(combo);
+      jointCounts[key] = 0;
+  });
+
+  // Count occurrences from the actual data
   data.rows.forEach(row => {
     const key = getKeyFromStates(row);
-    jointCounts[key] = (jointCounts[key] || 0) + 1;
+    // This check ensures we only count combinations that are part of our defined state space.
+    if (jointCounts.hasOwnProperty(key)) {
+        jointCounts[key]++;
+    }
   });
 
   const jointPMF: Distribution = {};
@@ -257,6 +280,62 @@ const getConditionalDistributions = (jointPMF: Distribution, marginals: { [key: 
     return conditionals;
 };
 
+const getConditionalMoments = (conditionalProbs: ConditionalDistributionTable[]): ConditionalMomentsTable[] => {
+    const conditionalMoments: ConditionalMomentsTable[] = [];
+
+    for (const condProbTable of conditionalProbs) {
+        const {
+            targetVariable,
+            conditionedVariable,
+            targetStates,
+            conditionedStates,
+            matrix, // matrix[i][j] = P(target=targetStates[j] | conditioned=conditionedStates[i])
+        } = condProbTable;
+
+        // Check if target states are numeric. If not, we can't calculate moments.
+        const numericTargetStates = targetStates.map(Number);
+        if (numericTargetStates.some(isNaN)) {
+            continue;
+        }
+
+        const expectations: number[] = [];
+        const variances: number[] = [];
+
+        // Iterate over each state of the conditioned variable (each row of the matrix)
+        for (let i = 0; i < conditionedStates.length; i++) {
+            const conditionalDistribution = matrix[i]; // This is P(target | conditioned = conditionedStates[i])
+
+            // Calculate E(X | Y=y_i)
+            let expectation = 0;
+            for (let j = 0; j < numericTargetStates.length; j++) {
+                expectation += numericTargetStates[j] * conditionalDistribution[j];
+            }
+
+            // Calculate E(X^2 | Y=y_i)
+            let expectationSq = 0;
+            for (let j = 0; j < numericTargetStates.length; j++) {
+                expectationSq += (numericTargetStates[j] ** 2) * conditionalDistribution[j];
+            }
+
+            // Calculate Var(X | Y=y_i)
+            const variance = expectationSq - (expectation ** 2);
+
+            expectations.push(expectation);
+            variances.push(variance);
+        }
+
+        conditionalMoments.push({
+            targetVariable,
+            conditionedVariable,
+            conditionedStates,
+            expectations,
+            variances,
+        });
+    }
+
+    return conditionalMoments;
+};
+
 // --- Markov Analysis Functions ---
 const getTransitionMatrix = (series: (string | number)[]): { states: (string | number)[], matrix: number[][] } => {
     const states = Array.from(new Set(series)).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
@@ -439,32 +518,55 @@ const calculateDistanceCorrelation = (seriesX: (string | number)[], seriesY: (st
     return dCor;
 };
 
-const simulateDataFromJointPMF = (jointPMF: Distribution, headers: string[], numSamples: number): CsvData => {
-    const outcomes = Object.keys(jointPMF);
-    const probabilities = Object.values(jointPMF);
-  
-    const cumulativeProbs: number[] = [];
-    let cumulative = 0;
-    for (const p of probabilities) {
-      cumulative += p;
-      cumulativeProbs.push(cumulative);
+const getDecimalPlaces = (num: number): number => {
+    if (Math.floor(num) === num || !isFinite(num)) return 0;
+    const str = num.toString();
+    const decimalPart = str.split('.')[1];
+    return decimalPart ? decimalPart.length : 0;
+};
+
+/**
+ * Generates a dataset that deterministically represents the exact proportions of a given model PMF.
+ * The size of the dataset is determined by the precision of the probabilities.
+ * e.g., probabilities with 2 decimal places (0.25) will result in a dataset of 100 points.
+ * @param jointPMF The model's joint probability mass function.
+ * @param headers The headers for the variables.
+ * @returns A CsvData object representing the model.
+ */
+const generateDataFromProportions = (jointPMF: Distribution, headers: string[]): CsvData => {
+    const probabilities = Object.values(jointPMF).filter(p => p > 0);
+    if (probabilities.length === 0) {
+        return { headers, rows: [] };
     }
-  
-    const simulatedRows: (string | number)[][] = [];
-    for (let i = 0; i < numSamples; i++) {
-      const rand = Math.random();
-      const outcomeIndex = cumulativeProbs.findIndex(cp => rand <= cp);
-      const outcomeKey = outcomes[outcomeIndex];
-      if (outcomeKey) {
-          const row = outcomeKey.split('|').map(cell => {
-               const trimmedCell = cell.trim();
-               return isNaN(Number(trimmedCell)) || trimmedCell === '' ? trimmedCell : Number(trimmedCell);
-          });
-          simulatedRows.push(row);
-      }
+
+    // Find the maximum number of decimal places to determine the scale factor 'n'
+    const maxDecimalPlaces = Math.max(...probabilities.map(p => getDecimalPlaces(p)));
+    const n = Math.pow(10, maxDecimalPlaces);
+
+    const generatedRows: (string | number)[][] = [];
+
+    for (const outcomeKey in jointPMF) {
+        const probability = jointPMF[outcomeKey];
+        if (probability > 0) {
+            const numRows = Math.round(probability * n);
+            const row = outcomeKey.split('|').map(cell => {
+                const trimmedCell = cell.trim();
+                return isNaN(Number(trimmedCell)) || trimmedCell === '' ? trimmedCell : Number(trimmedCell);
+            });
+
+            for (let i = 0; i < numRows; i++) {
+                generatedRows.push([...row]);
+            }
+        }
     }
-  
-    return { headers, rows: simulatedRows };
+    
+    // Shuffling is good practice, though dCor is order-insensitive.
+    for (let i = generatedRows.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [generatedRows[i], generatedRows[j]] = [generatedRows[j], generatedRows[i]];
+    }
+
+    return { headers, rows: generatedRows };
 };
 
 
@@ -488,6 +590,9 @@ export function analyzeData(
       empiricalDists.cmf = calculateCmf(singleVarDist);
   } else {
       empiricalDists.conditionals = getConditionalDistributions(empiricalJoint, empiricalMarginals, data.headers);
+      if (empiricalDists.conditionals) {
+        empiricalDists.conditionalMoments = getConditionalMoments(empiricalDists.conditionals);
+      }
   }
 
   let result: AnalysisResult = { 
@@ -532,9 +637,9 @@ export function analyzeData(
               const pairwiseModelJoint = getPairwiseJointPMF(modelJoint, data.headers, pair);
               const modelMI = calculatePairwiseMutualInformation(pairwiseModelJoint, modelMarginals[h1], modelMarginals[h2]);
 
-              const simulatedData = simulateDataFromJointPMF(modelJoint, data.headers, data.rows.length);
-              const simSeriesX = simulatedData.rows.map(r => r[h1Index]);
-              const simSeriesY = simulatedData.rows.map(r => r[h2Index]);
+              const generatedData = generateDataFromProportions(modelJoint, data.headers);
+              const simSeriesX = generatedData.rows.map(r => r[h1Index]);
+              const simSeriesY = generatedData.rows.map(r => r[h2Index]);
               const modelDC = calculateDistanceCorrelation(simSeriesX, simSeriesY);
 
               return {
@@ -591,6 +696,9 @@ export function analyzeData(
         const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
         if (!isSingleVariable) {
             modelDists.conditionals = getConditionalDistributions(modelJoint, modelMarginals, data.headers);
+            if (modelDists.conditionals) {
+                modelDists.conditionalMoments = getConditionalMoments(modelDists.conditionals);
+            }
         }
 
         const empiricalMetricDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;

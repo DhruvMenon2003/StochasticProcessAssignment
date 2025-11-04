@@ -47,10 +47,19 @@ export interface ConditionalDistributionTable {
   matrix: number[][];
 }
 
+export interface ConditionalMomentsTable {
+  targetVariable: string;
+  conditionedVariable: string;
+  conditionedStates: (string | number)[];
+  expectations: number[];
+  variances: number[];
+}
+
 export interface CalculatedDistributions {
   joint: Distribution;
   marginals: { [key: string]: Distribution };
   conditionals?: ConditionalDistributionTable[];
+  conditionalMoments?: ConditionalMomentsTable[];
   moments?: { mean: number; variance: number }; // For single variable
   cmf?: Distribution; // For single variable
 }

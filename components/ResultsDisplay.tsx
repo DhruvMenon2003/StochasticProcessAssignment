@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { AnalysisResult } from '../services/stochasticService';
 import { MetricCard } from './MetricCard';
@@ -9,6 +8,7 @@ import { ModelComparisonTable } from './ModelComparisonTable';
 import { SingleVariableDisplay } from './SingleVariableDisplay';
 import { ConditionalDistributionDisplay } from './ConditionalDistributionDisplay';
 import { DependenceAnalysisDisplay } from './DependenceAnalysisDisplay';
+import { ConditionalMomentsDisplay } from './ConditionalMomentsDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -127,6 +127,20 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
         </div>
       )}
 
+      {results.empirical.conditionalMoments && results.empirical.conditionalMoments.length > 0 && (
+        <div>
+          <h3 className="text-2xl font-bold text-gray-100 my-4">Empirical Conditional Moments</h3>
+           <p className="text-gray-400 mb-4 text-sm -mt-2">
+            Conditional expectation and variance. These are only calculated for pairs where the target variable is numeric.
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            {results.empirical.conditionalMoments.map((dist, index) => (
+              <ConditionalMomentsDisplay key={index} distribution={dist} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {results.modelResults?.map(modelResult => (
          <div key={modelResult.name}>
           <h3 className="text-2xl font-bold text-gray-100 mb-4">Model Distributions: <span className="text-teal-300">{modelResult.name}</span></h3>
@@ -146,6 +160,16 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   {modelResult.distributions.conditionals.map((dist, index) => (
                     <ConditionalDistributionDisplay key={index} distribution={dist} />
+                  ))}
+                </div>
+              </div>
+            )}
+           {modelResult.distributions.conditionalMoments && modelResult.distributions.conditionalMoments.length > 0 && (
+              <div className="mt-8">
+                <h4 className="text-xl font-bold text-gray-200 mb-4">Model Conditional Moments</h4>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {modelResult.distributions.conditionalMoments.map((dist, index) => (
+                    <ConditionalMomentsDisplay key={index} distribution={dist} />
                   ))}
                 </div>
               </div>
