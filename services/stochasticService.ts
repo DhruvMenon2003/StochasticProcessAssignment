@@ -221,6 +221,65 @@ const calculatePairwiseMutualInformation = (pairwiseJointPMF: Distribution, marg
     return mi;
 };
 
+const calculatePearsonCorrelation = (
+    pairwiseJointPMF: Distribution,
+    marginal1: Distribution,
+    marginal2: Distribution
+): number | null => {
+    // Check if all states in both marginals are numeric
+    const allStates1 = Object.keys(marginal1);
+    const allStates2 = Object.keys(marginal2);
+
+    if (allStates1.some(s => isNaN(Number(s))) || allStates2.some(s => isNaN(Number(s)))) {
+        return null; // Not applicable for non-numeric data
+    }
+
+    let e_x = 0;
+    let e_y = 0;
+    let e_x2 = 0;
+    let e_y2 = 0;
+
+    for (const state in marginal1) {
+        const numState = Number(state);
+        const prob = marginal1[state];
+        e_x += numState * prob;
+        e_x2 += (numState ** 2) * prob;
+    }
+
+    for (const state in marginal2) {
+        const numState = Number(state);
+        const prob = marginal2[state];
+        e_y += numState * prob;
+        e_y2 += (numState ** 2) * prob;
+    }
+
+    const var_x = e_x2 - (e_x ** 2);
+    const var_y = e_y2 - (e_y ** 2);
+
+    const std_dev_x = Math.sqrt(var_x);
+    const std_dev_y = Math.sqrt(var_y);
+
+    if (std_dev_x < 1e-9 || std_dev_y < 1e-9) {
+        return 0; // Avoid division by zero if variance is zero
+    }
+    
+    let e_xy = 0;
+    for (const jointKey in pairwiseJointPMF) {
+        const states = jointKey.split('|');
+        const x = Number(states[0]);
+        const y = Number(states[1]);
+        const prob = pairwiseJointPMF[jointKey];
+        e_xy += x * y * prob;
+    }
+    
+    const cov_xy = e_xy - (e_x * e_y);
+    
+    const correlation = cov_xy / (std_dev_x * std_dev_y);
+
+    // Clamp the value between -1 and 1 to handle potential floating point inaccuracies
+    return Math.max(-1, Math.min(1, correlation));
+};
+
 // --- Conditional Distribution ---
 const getConditionalDistributions = (jointPMF: Distribution, marginals: { [key: string]: Distribution }, headers: string[]): ConditionalDistributionTable[] => {
     if (headers.length < 2) {
@@ -624,10 +683,12 @@ export function analyzeData(
           const seriesX = data.rows.map(r => r[h1Index]);
           const seriesY = data.rows.map(r => r[h2Index]);
           const empiricalDC = calculateDistanceCorrelation(seriesX, seriesY);
+          const empiricalPearson = calculatePearsonCorrelation(pairwiseEmpiricalJoint, empiricalMarginals[h1], empiricalMarginals[h2]);
           
           const empiricalMetrics: DependenceMetrics = {
               mutualInformation: empiricalMI,
               distanceCorrelation: empiricalDC,
+              pearsonCorrelation: empiricalPearson,
           };
 
           // --- Model Calculations ---
@@ -641,11 +702,13 @@ export function analyzeData(
               const simSeriesX = generatedData.rows.map(r => r[h1Index]);
               const simSeriesY = generatedData.rows.map(r => r[h2Index]);
               const modelDC = calculateDistanceCorrelation(simSeriesX, simSeriesY);
+              const modelPearson = calculatePearsonCorrelation(pairwiseModelJoint, modelMarginals[h1], modelMarginals[h2]);
 
               return {
                   modelName: name,
                   mutualInformation: modelMI,
                   distanceCorrelation: modelDC,
+                  pearsonCorrelation: modelPearson,
               };
           });
 

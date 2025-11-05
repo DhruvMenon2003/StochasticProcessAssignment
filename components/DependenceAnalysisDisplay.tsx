@@ -44,11 +44,16 @@ export const DependenceAnalysisDisplay: React.FC<DependenceAnalysisDisplayProps>
                                     <td className="p-3">{formatValue(empiricalMetrics.distanceCorrelation)}</td>
                                     {modelMetrics.map(m => <td key={m.modelName} className="p-3">{formatValue(m.distanceCorrelation)}</td>)}
                                 </tr>
+                                <tr className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50 transition-colors">
+                                    <td className="p-3 font-semibold text-gray-400">Pearson Correlation</td>
+                                    <td className="p-3">{formatValue(empiricalMetrics.pearsonCorrelation)}</td>
+                                    {modelMetrics.map(m => <td key={m.modelName} className="p-3">{formatValue(m.pearsonCorrelation)}</td>)}
+                                </tr>
                             </tbody>
                         </table>
                     </div>
                      <div className="text-xs text-gray-500 p-2 text-right">
-                        Higher values indicate stronger dependence. N/A for Distance Correlation on non-numeric data.
+                        Higher values indicate stronger dependence. N/A for Pearson/Distance Correlation on non-numeric data.
                     </div>
                 </div>
             ))}

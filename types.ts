@@ -86,6 +86,7 @@ export interface ModelAnalysisResult {
 export interface DependenceMetrics {
     mutualInformation: number | null;
     distanceCorrelation: number | null;
+    pearsonCorrelation: number | null;
 }
 
 export interface ModelDependenceMetrics extends DependenceMetrics {
