@@ -77,9 +77,25 @@ export interface OrderResult {
   marginals: { [time: string]: Distribution };
 }
 
+export interface TimeBasedConditionalDistributionTable {
+  title: string;
+  targetTime: string;
+  conditionedTimes: string[];
+  targetStates: (string | number)[];
+  conditionedStatesCombinations: (string | number)[][];
+  matrix: number[][];
+}
+
+export interface TimeBasedConditionalDistributionSet {
+  order: number;
+  distributions: TimeBasedConditionalDistributionTable[];
+}
+
+
 export interface SelfDependenceAnalysis {
   orders: OrderResult[];
   conclusion: string;
+  conditionalDistributionSets?: TimeBasedConditionalDistributionSet[];
 }
 
 export interface AnalysisResult {

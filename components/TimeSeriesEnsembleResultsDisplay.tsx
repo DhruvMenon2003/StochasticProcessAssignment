@@ -3,6 +3,7 @@ import { AnalysisResult } from '../types';
 import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
 import { TransitionMatrixDisplay } from './TransitionMatrixDisplay';
 import { SelfDependenceDisplay } from './SelfDependenceDisplay';
+import { ConditionalDistributionsDisplay } from './ConditionalDistributionsDisplay';
 
 interface TimeSeriesEnsembleResultsDisplayProps {
   results: AnalysisResult;
@@ -52,6 +53,10 @@ export const TimeSeriesEnsembleResultsDisplay: React.FC<TimeSeriesEnsembleResult
                 </div>
             )
         ))}
+
+        {results.selfDependenceAnalysis?.conditionalDistributionSets && (
+            <ConditionalDistributionsDisplay analysis={results.selfDependenceAnalysis} />
+        )}
 
       </div>
 

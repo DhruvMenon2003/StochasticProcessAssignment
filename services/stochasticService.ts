@@ -15,6 +15,8 @@ import {
   TransitionMatrixModelDef,
   SelfDependenceAnalysis,
   OrderResult,
+  TimeBasedConditionalDistributionSet,
+  TimeBasedConditionalDistributionTable,
 } from '../types';
 import { transpose, cartesianProduct, klDivergence } from '../utils/mathUtils';
 import { isTimeSeriesEnsemble } from '../utils/csvParser';
@@ -191,6 +193,9 @@ function getConditionalDistribution(
     const conditionTotals = new Map<string, number>();
 
     instanceData.forEach(trace => {
+        if (conditionTimeIndices.some(i => trace[i] === undefined) || trace[targetTimeIndex] === undefined) {
+          return; // Skip traces that are too short for this condition
+        }
         const conditionKey = conditionTimeIndices.map(i => trace[i]).join('|');
         const targetValue = trace[targetTimeIndex];
         
@@ -217,7 +222,11 @@ function getConditionalDistribution(
 }
 
 
-function analyzeSelfDependence(instanceData: (string|number)[][], states: (string|number)[]): SelfDependenceAnalysis {
+function analyzeSelfDependence(
+    instanceData: (string|number)[][], 
+    states: (string|number)[],
+    timeSteps: (string|number)[]
+): SelfDependenceAnalysis {
     memo.clear();
     const numInstances = instanceData.length;
     const numTimePoints = instanceData[0].length;
@@ -242,7 +251,7 @@ function analyzeSelfDependence(instanceData: (string|number)[][], states: (strin
         const allPossibleSequences = cartesianProduct(...Array(numTimePoints).fill(states));
         
         allPossibleSequences.forEach(sequence => {
-            let prob = marginalT0[sequence[0]] || 0;
+            let prob = marginalT0[String(sequence[0])] || 0;
             if (prob === 0) return;
 
             for (let t = 1; t < numTimePoints; t++) {
@@ -252,7 +261,7 @@ function analyzeSelfDependence(instanceData: (string|number)[][], states: (strin
                 const condDistMap = conditionalDistributions.get(condKey)!;
 
                 const conditionValueKey = conditionIndices.map(i => sequence[i]).join('|');
-                const targetProb = condDistMap.get(conditionValueKey)?.[sequence[t]] || 0;
+                const targetProb = condDistMap.get(conditionValueKey)?.[String(sequence[t])] || 0;
                 
                 prob *= targetProb;
                 if (prob === 0) break;
@@ -313,8 +322,46 @@ function analyzeSelfDependence(instanceData: (string|number)[][], states: (strin
          }
     }
 
+    // Format conditional distributions for display
+    const conditionalDistributionSets: TimeBasedConditionalDistributionSet[] = [];
+    for (let order = 1; order < numTimePoints; order++) {
+        const distributionsForThisOrder: TimeBasedConditionalDistributionTable[] = [];
+        for (let t = 1; t < numTimePoints; t++) {
+            const lookback = Math.min(t, order);
+            const conditionIndices = Array.from({length: lookback}, (_, i) => t - (i + 1)).reverse();
+            
+            if (conditionIndices.length === 0) continue;
 
-    return { orders: results.slice(0, -1), conclusion };
+            const key = `${t}:${conditionIndices.join(',')}`;
+            const condDistMap = conditionalDistributions.get(key);
+            if (!condDistMap) continue;
+
+            const conditionedTimes = conditionIndices.map(i => timeSteps[i] as string);
+            const conditionedStateSpaces = Array(conditionIndices.length).fill(states);
+            const conditionedStatesCombinations = cartesianProduct(...conditionedStateSpaces);
+            const matrix: number[][] = [];
+
+            conditionedStatesCombinations.forEach(combo => {
+                const conditionValueKey = combo.join('|');
+                const dist = condDistMap.get(conditionValueKey) || {};
+                const row = states.map(targetState => dist[String(targetState)] || 0);
+                matrix.push(row);
+            });
+            
+            distributionsForThisOrder.push({
+                title: `P(${timeSteps[t]} | ${conditionedTimes.join(', ')})`,
+                targetTime: timeSteps[t] as string,
+                conditionedTimes,
+                targetStates: states,
+                conditionedStatesCombinations,
+                matrix
+            });
+        }
+        conditionalDistributionSets.push({ order, distributions: distributionsForThisOrder });
+    }
+
+
+    return { orders: results.slice(0, -1), conclusion, conditionalDistributionSets };
 }
 
 
@@ -323,11 +370,13 @@ function analyzeTimeSeriesEnsemble(
     models: TransitionMatrixModelDef[],
     options: AnalysisOptions
 ): AnalysisResult {
-    const instanceData = transpose(data.rows.map(row => row.slice(1)));
+    // Fix: Add explicit type for `row` to ensure `instanceData` is correctly typed as (string | number)[][] instead of unknown[][].
+    const instanceData = transpose(data.rows.map((row: (string|number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }
     const allStates = Array.from(new Set(instanceData.flat())).sort();
+    const timeSteps = data.rows.map(r => r[0]);
     const stateIndex = new Map(allStates.map((s, i) => [s, i]));
     const n = allStates.length;
     const transitionCounts = Array(n).fill(0).map(() => Array(n).fill(0));
@@ -377,7 +426,7 @@ function analyzeTimeSeriesEnsemble(
     });
 
     const selfDependenceAnalysis = options.runMarkovOrderTest 
-        ? analyzeSelfDependence(instanceData, allStates) 
+        ? analyzeSelfDependence(instanceData, allStates, timeSteps) 
         : undefined;
 
 
