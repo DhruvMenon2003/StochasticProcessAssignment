@@ -19,18 +19,29 @@ export const MomentsDisplay: React.FC<MomentsDisplayProps> = ({ title, moments }
   return (
     <div>
       <h4 className="font-semibold text-lg text-gray-300 mb-2">{title}</h4>
-      <div className="bg-gray-800 p-3 rounded-md text-sm font-mono whitespace-pre-wrap border border-gray-700">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+      <div className="bg-gray-800 rounded-md text-sm font-mono max-h-80 overflow-auto border border-gray-700">
+        <table className="w-full text-left">
+          <thead className="sticky top-0 bg-gray-800 z-10">
+            <tr className="border-b border-gray-600">
+              <th className="p-3 font-semibold">Variable</th>
+              <th className="p-3 font-semibold text-center">Expectation (Mean)</th>
+              <th className="p-3 font-semibold text-center">Variance</th>
+            </tr>
+          </thead>
+          <tbody>
             {validMoments.map(([variable, { mean, variance }]) => (
-                <div key={variable}>
-                    <span className="font-semibold text-gray-400">{variable}:</span>
-                    <div className="pl-4">
-                        <span>E(X): <span className="text-teal-300">{mean.toFixed(4)}</span></span>,{' '}
-                        <span>Var(X): <span className="text-teal-300">{variance.toFixed(4)}</span></span>
-                    </div>
-                </div>
+              <tr key={variable} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50">
+                <th className="p-3 font-semibold bg-gray-800 sticky left-0">{variable}</th>
+                <td className="p-3 text-center">
+                  {mean.toFixed(4)}
+                </td>
+                <td className="p-3 text-center">
+                  {variance.toFixed(4)}
+                </td>
+              </tr>
             ))}
-        </div>
+          </tbody>
+        </table>
       </div>
     </div>
   );
