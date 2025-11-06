@@ -1,142 +1,80 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
-import { ResultsDisplay } from './components/ResultsDisplay';
-import { CalculatorIcon } from './components/icons/CalculatorIcon';
-import { parseCsvData } from './utils/csvParser';
-import { analyzeData, AnalysisResult, isTimeSeriesEnsemble } from './services/stochasticService';
-import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, ModelDef, VariableDef } from './types';
 import { ModelsManager } from './components/ModelsManager';
-import { NewFileIcon } from './components/icons/NewFileIcon';
+import { AnalysisOptions } from './components/AnalysisOptions';
+import { ResultsDisplay } from './components/ResultsDisplay';
+import { parseCsvData } from './utils/csvParser';
+import { analyzeStochasticProcess } from './services/stochasticService';
+import { getAnalysisExplanation } from './services/geminiService';
+import { CsvData, VariableDef, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisResult, AnalysisMode } from './types';
 
-// Helper to load session from localStorage
-const loadSession = () => {
-  try {
-    const saved = localStorage.getItem('stochastic-session');
-    return saved ? JSON.parse(saved) : null;
-  } catch (e) {
-    console.error("Could not parse saved session:", e);
-    return null;
-  }
-};
+const exampleData = `VarX,VarY
+A,1
+B,2
+A,1
+A,2
+B,1
+C,2
+A,1
+B,2
+C,1`;
 
-export default function App() {
-  const [csvString, setCsvString] = useState<string>(() => loadSession()?.csvString || '');
-  const [models, setModels] = useState<ModelDef[]>(() => {
-    const sessionData = loadSession();
-    if (!sessionData || !sessionData.models) return [];
-    // Re-hydrate models, setting transient state to default values.
-    return sessionData.models.map((m: Omit<ModelDef, 'error' | 'modelString'>) => ({ 
-        ...m, 
-        error: null, 
-        modelString: '' 
-    }));
+function App() {
+  const [csvString, setCsvString] = useState<string>(exampleData);
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('timeSeries');
+  const [models, setModels] = useState<ModelDef[]>([]);
+  const [options, setOptions] = useState<AnalysisOptionsType>({
+    runMarkovOrderTest: false,
+    runTimeHomogeneityTest: false,
   });
-  const [templateVariables, setTemplateVariables] = useState<VariableDef[]>([]);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [error, setError] = useState<string | null>(null);
 
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'unsaved' | 'saved'>('idle');
-  const saveTimeoutRef = useRef<number | null>(null);
-  const statusTimeoutRef = useRef<number | null>(null);
-  const isInitialMount = useRef(true);
-
-  const [isTimeSeriesMode, setIsTimeSeriesMode] = useState(false);
-
-  // Effect to detect data format and set analysis mode
-  useEffect(() => {
+  const parsedData = useMemo<CsvData>(() => {
     try {
-      const data = parseCsvData(csvString);
-      const isTs = isTimeSeriesEnsemble(data.headers);
-      setIsTimeSeriesMode(isTs);
+      return parseCsvData(csvString);
     } catch (e) {
-      setIsTimeSeriesMode(false);
+      console.error("CSV parsing error:", e);
+      return { headers: [], rows: [] };
     }
   }, [csvString]);
 
-
-  // Effect to automatically detect variables from CSV to use as a template for new models
-  useEffect(() => {
-    try {
-      const data = parseCsvData(csvString);
-      const headers = data.headers;
-      
-      if (headers.length === 0 || isTimeSeriesEnsemble(headers)) {
-        setTemplateVariables([]);
-        return;
-      }
-      
-      const newVariables = headers.map(header => ({
-          name: header,
-          states: '',
-      }));
-      setTemplateVariables(newVariables);
-    } catch (e) {
-      // Ignore parsing errors during typing
-    }
-  }, [csvString]);
-
-  // --- REVISED AUTOSAVE EFFECT ---
-  useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-
-    setSaveStatus('unsaved');
+  const templateVariables = useMemo<VariableDef[]>(() => {
+    if (parsedData.headers.length === 0) return [];
     
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+    // Infer states from data
+    const uniqueStates: { [key: string]: Set<string | number> } = {};
+    parsedData.headers.forEach(h => {
+      uniqueStates[h] = new Set();
+    });
 
-    saveTimeoutRef.current = window.setTimeout(() => {
-      setSaveStatus('saving');
-      
-      setTimeout(() => {
-        try {
-          const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
-            id,
-            name,
-            variables,
-            probabilities,
-          }));
-          const sessionData = {
-            csvString,
-            models: modelsToSave,
-          };
-          localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
-          
-          setSaveStatus('saved');
+    const headerIndexMap = new Map(parsedData.headers.map((h, i) => [h, i]));
 
-          statusTimeoutRef.current = window.setTimeout(() => setSaveStatus('idle'), 2000);
-
-        } catch (e) {
-          console.error("Could not autosave session:", e);
-          setSaveStatus('idle');
+    parsedData.rows.forEach(row => {
+      parsedData.headers.forEach(h => {
+        const index = headerIndexMap.get(h);
+        if (index !== undefined && row[index] !== undefined && row[index] !== '') {
+          uniqueStates[h].add(row[index]);
         }
-      }, 100);
-    }, 1500);
+      });
+    });
 
-    return () => {
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
-    };
-  }, [csvString, models]);
+    return parsedData.headers.map(h => ({
+      name: h,
+      states: Array.from(uniqueStates[h]).sort().join(', '),
+    }));
 
+  }, [parsedData]);
+  
+  // Reset models if headers change
+  useEffect(() => {
+     setModels([]);
+  }, [templateVariables.map(v => v.name).join(',')]);
 
-  const handleNewSession = useCallback(() => {
-    setCsvString('');
-    setModels([]);
-    setAnalysisResult(null);
-    setExplanation(null);
-    setError(null);
-    try {
-      localStorage.removeItem('stochastic-session');
-    } catch (e) {
-      console.error("Could not clear session from storage:", e);
-    }
-  }, []);
 
   const handleAnalyze = useCallback(async () => {
     setIsLoading(true);
@@ -145,125 +83,92 @@ export default function App() {
     setExplanation(null);
 
     try {
-      if (!csvString.trim()) {
-        throw new Error('Dataset cannot be empty.');
+      if (parsedData.rows.length === 0) {
+        throw new Error("No data provided to analyze.");
       }
       
-      const modelsWithErrors = models.filter(m => m.error);
-      if (modelsWithErrors.length > 0) {
-        throw new Error(`Model '${modelsWithErrors[0].name}' is not valid. Please fix it before analyzing.`);
-      }
-
-      const data: CsvData = parseCsvData(csvString);
-      if (data.headers.length === 0 || data.rows.length === 0) {
-        throw new Error('Invalid or empty dataset provided.');
-      }
-      
-      const parsedModels = models
-        .filter(m => m.modelString.trim() && m.modelString.trim() !== '[]')
-        .map(m => ({
-          name: m.name,
-          model: JSON.parse(m.modelString)
-        }));
-
-      const results = analyzeData(data, parsedModels);
+      const results = analyzeStochasticProcess(parsedData, models, analysisMode, options);
       setAnalysisResult(results);
-
+      
       const geminiExplanation = await getAnalysisExplanation(results);
       setExplanation(geminiExplanation);
 
     } catch (e: any) {
-      setError(e.message || 'An unexpected error occurred.');
+      setError(e.message || "An unexpected error occurred during analysis.");
+      console.error(e);
     } finally {
       setIsLoading(false);
     }
-  }, [csvString, models]);
+  }, [parsedData, models, analysisMode, options]);
 
-  const hasAnyInvalidModel = models.some(m => !!m.error);
+  const isTimeSeries = analysisMode !== 'joint';
 
   return (
-    <div className="min-h-screen bg-gray-900 text-gray-200 font-sans">
-      <main className="container mx-auto p-4 md:p-8">
-        <header className="text-center mb-6">
-          <h1 className="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
-            Stochastic Process Analyzer
-          </h1>
-          <p className="mt-4 text-lg text-gray-400">
-            Evaluate datasets against multiple probability models with advanced stochastic metrics.
-          </p>
-        </header>
-
-        <div className="flex justify-end items-center gap-4 mb-8 border-b border-gray-700 pb-4">
-           <div className="text-gray-400 text-sm italic transition-opacity duration-300 w-36 text-right">
-            {saveStatus === 'unsaved' && <span className="text-yellow-400">Unsaved changes</span>}
-            {saveStatus === 'saving' && 'Saving...'}
-            {saveStatus === 'saved' && <span className="text-green-400">All changes saved</span>}
+    <div className="bg-gray-900 text-gray-200 min-h-screen font-sans">
+      <header className="bg-gray-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-gray-700">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
+              Stochastic Process Analyzer
+            </h1>
           </div>
-          <button
-            onClick={handleNewSession}
-            className="inline-flex items-center justify-center px-4 py-2 bg-gray-700/80 text-white font-semibold rounded-md shadow-sm hover:bg-gray-600 transition-colors duration-200"
-          >
-            <NewFileIcon className="mr-2 h-5 w-5" />
-            Start New Session
-          </button>
         </div>
-
-        <div className="space-y-8">
-          <DataInput value={csvString} onChange={setCsvString} />
-
-          {isTimeSeriesMode ? (
-            <div className="text-center p-4 bg-blue-900/30 border border-blue-700 rounded-lg">
-                <p className="font-semibold text-blue-300">Time Series Ensemble Mode Detected</p>
-                <p className="text-sm text-blue-400">A specialized self-dependence and time-homogeneity analysis will be performed. Model definition is disabled.</p>
-            </div>
-          ) : (
-            <ModelsManager 
-              models={models}
-              setModels={setModels}
-              templateVariables={templateVariables}
-            />
-          )}
-        </div>
-
-        <div className="text-center mt-10">
-          <button
-            onClick={handleAnalyze}
-            disabled={isLoading || !csvString.trim() || hasAnyInvalidModel}
-            className="inline-flex items-center justify-center px-8 py-4 bg-blue-600 text-white font-bold rounded-lg shadow-lg hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-all duration-300 transform hover:scale-105"
-          >
-            {isLoading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Analyzing...
-              </>
-            ) : (
-              <>
-                <CalculatorIcon className="mr-3 h-6 w-6" />
-                Analyze Process
-              </>
+      </header>
+      <main className="container mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="space-y-8">
+            <DataInput value={csvString} onChange={setCsvString} />
+            <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />
+            {isTimeSeries && (
+                <AnalysisOptions options={options} setOptions={setOptions} disabled={analysisMode==='timeSeriesEnsemble'}/>
             )}
-          </button>
+          </div>
+          <div className="lg:col-span-1">
+            <div className="sticky top-20">
+              <div className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
+                <h2 className="text-2xl font-bold text-gray-100 mb-4">Run Analysis</h2>
+                <div className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">Analysis Mode</label>
+                        <select 
+                            value={analysisMode} 
+                            onChange={(e) => setAnalysisMode(e.target.value as AnalysisMode)}
+                            className="bg-gray-900 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                        >
+                            <option value="timeSeries">Time Series (Single Trace)</option>
+                            <option value="joint">Joint Distribution (Cross-sectional)</option>
+                            {/* <option value="timeSeriesEnsemble">Time Series (Ensemble)</option> */}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                            {analysisMode === 'timeSeries' ? 'Data is a single sequence over time.' : 'Each row is an independent observation.'}
+                        </p>
+                    </div>
+
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={isLoading || parsedData.rows.length === 0}
+                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors text-lg"
+                    >
+                      {isLoading ? 'Analyzing...' : 'Analyze'}
+                    </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-
-        {error && (
-          <div className="mt-8 p-4 bg-red-900/50 border border-red-700 text-red-300 rounded-lg text-center">
-            <p className="font-bold">Error</p>
-            <p>{error}</p>
-          </div>
-        )}
-
-        {analysisResult && (
-          <div className="mt-12">
-            <ResultsDisplay results={analysisResult} explanation={explanation} />
-          </div>
-        )}
+        
+        <div className="mt-12">
+           <ResultsDisplay 
+              isLoading={isLoading}
+              error={error}
+              results={analysisResult}
+              explanation={explanation}
+              mode={analysisMode}
+            />
+        </div>
       </main>
-      <footer className="text-center py-6 text-gray-500 text-sm">
-        <p>Built for advanced stochastic analysis. Copyright &copy; 2024</p>
-      </footer>
     </div>
   );
 }
+
+export default App;
