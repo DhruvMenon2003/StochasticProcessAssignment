@@ -36,7 +36,7 @@ export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({ mode
                             <td className="p-3">{result.comparison.hellingerDistance.toFixed(5)}</td>
                             <td className="p-3">{result.comparison.meanSquaredError.toFixed(5)}</td>
                             <td className="p-3">{isFinite(result.comparison.kullbackLeiblerDivergence) ? result.comparison.kullbackLeiblerDivergence.toFixed(5) : '∞'}</td>
-                            <td className="p-3 font-bold">{result.comparison.score.toFixed(5)}</td>
+                            <td className="p-3 font-bold">{result.comparison.score?.toFixed(5) ?? 'N/A'}</td>
                         </tr>
                     ))}
                 </tbody>
