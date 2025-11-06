@@ -39,7 +39,7 @@ export const SingleVariableComparisonTable: React.FC<SingleVariableComparisonTab
                                 return (
                                     <td key={res.name} className={`p-3 text-center ${metric?.isWinner ? 'bg-green-900/40' : ''}`}>
                                         <div className="flex items-center justify-center gap-2">
-                                            <span>{isFinite(metric?.value ?? 0) ? metric?.value.toFixed(5) : '∞'}</span>
+                                            <span>{isFinite(metric?.value ?? NaN) ? metric?.value.toFixed(5) : 'N/A'}</span>
                                             {metric?.isWinner && <CheckIcon className="w-5 h-5 text-green-400" />}
                                         </div>
                                     </td>

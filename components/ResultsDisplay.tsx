@@ -9,6 +9,7 @@ import { SingleVariableDisplay } from './SingleVariableDisplay';
 import { ConditionalDistributionDisplay } from './ConditionalDistributionDisplay';
 import { DependenceAnalysisDisplay } from './DependenceAnalysisDisplay';
 import { ConditionalMomentsDisplay } from './ConditionalMomentsDisplay';
+import { MomentsDisplay } from './MomentsDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -114,6 +115,9 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
             </React.Fragment>
           ))}
         </div>
+        <div className="mt-6">
+          <MomentsDisplay title="Empirical Moments" moments={results.empirical.moments} />
+        </div>
       </div>
 
       {results.empirical.conditionals && results.empirical.conditionals.length > 0 && (
@@ -153,6 +157,9 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
                 {modelResult.distributions.marginals[header] && <MarginalDistributionDisplay dist={modelResult.distributions.marginals[header]} title={`Model (${header})`} />}
               </React.Fragment>
             ))}
+          </div>
+          <div className="mt-6">
+            <MomentsDisplay title="Model Moments" moments={modelResult.distributions.moments} />
           </div>
            {modelResult.distributions.conditionals && modelResult.distributions.conditionals.length > 0 && (
               <div className="mt-8">

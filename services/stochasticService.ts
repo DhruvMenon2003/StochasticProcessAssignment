@@ -127,23 +127,32 @@ const getMarginals = (jointPMF: Distribution, headers: string[]): { [key: string
 
 const calculateMoments = (dist: Distribution): { mean: number; variance: number } => {
     let mean = 0;
-    
-    // First pass to calculate mean
+    let weightSum = 0;
+    const numericStates: { value: number, prob: number }[] = [];
+
     for (const state in dist) {
         const numState = Number(state);
         if (!isNaN(numState)) {
-            mean += numState * dist[state];
+            numericStates.push({ value: numState, prob: dist[state] });
+            weightSum += dist[state];
         }
     }
 
-    let variance = 0;
-    // Second pass to calculate variance
-    for (const state in dist) {
-        const numState = Number(state);
-        if (!isNaN(numState)) {
-            variance += ((numState - mean) ** 2) * dist[state];
-        }
+    if (numericStates.length === 0 || weightSum < 1e-9) {
+        return { mean: NaN, variance: NaN };
     }
+
+    for (const { value, prob } of numericStates) {
+        mean += value * prob;
+    }
+    mean /= weightSum;
+
+    let variance = 0;
+    for (const { value, prob } of numericStates) {
+        variance += ((value - mean) ** 2) * prob;
+    }
+    variance /= weightSum;
+    
     return { mean, variance };
 };
 
@@ -642,10 +651,15 @@ export function analyzeData(
   const empiricalMarginals = getMarginals(empiricalJoint, data.headers);
   const empiricalDists: CalculatedDistributions = { joint: empiricalJoint, marginals: empiricalMarginals };
 
+  const empiricalMoments: { [key: string]: { mean: number; variance: number } } = {};
+  data.headers.forEach(header => {
+    empiricalMoments[header] = calculateMoments(empiricalMarginals[header]);
+  });
+  empiricalDists.moments = empiricalMoments;
+
   if (isSingleVariable) {
       const singleVarHeader = data.headers[0];
       const singleVarDist = empiricalMarginals[singleVarHeader];
-      empiricalDists.moments = calculateMoments(singleVarDist);
       empiricalDists.cmf = calculateCmf(singleVarDist);
   } else {
       empiricalDists.conditionals = getConditionalDistributions(empiricalJoint, empiricalMarginals, data.headers);
@@ -757,6 +771,15 @@ export function analyzeData(
         const modelJoint = getModelJointPMF(model, data.headers);
         const modelMarginals = getMarginals(modelJoint, data.headers);
         const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
+        
+        const modelMoments: { [key: string]: { mean: number; variance: number } } = {};
+        data.headers.forEach(header => {
+            if (modelMarginals[header]) {
+                modelMoments[header] = calculateMoments(modelMarginals[header]);
+            }
+        });
+        modelDists.moments = modelMoments;
+        
         if (!isSingleVariable) {
             modelDists.conditionals = getConditionalDistributions(modelJoint, modelMarginals, data.headers);
             if (modelDists.conditionals) {
@@ -770,29 +793,30 @@ export function analyzeData(
         let mse;
         if (isSingleVariable) {
             const singleVarHeader = data.headers[0];
-            const empMoments = calculateMoments(empiricalDists.marginals[singleVarHeader]);
-            const modMoments = calculateMoments(modelDists.marginals[singleVarHeader]);
-            modelDists.moments = modMoments;
+            const empMoments = empiricalDists.moments?.[singleVarHeader];
+            const modMoments = modelDists.moments?.[singleVarHeader];
             modelDists.cmf = calculateCmf(modelDists.marginals[singleVarHeader]);
 
-            const bias = modMoments.mean - empMoments.mean;
-            mse = (bias ** 2) + modMoments.variance;
+            if (empMoments && !isNaN(empMoments.mean) && modMoments && !isNaN(modMoments.mean)) {
+                const bias = modMoments.mean - empMoments.mean;
+                mse = (bias ** 2) + modMoments.variance;
+            } else {
+                mse = NaN;
+            }
         } else {
             let totalMse = 0;
+            let numericVarsCount = 0;
             data.headers.forEach(header => {
-                const empDist = empiricalDists.marginals[header];
-                const modDist = modelDists.marginals[header];
-
-                if (empDist && modDist) {
-                    const empMoments = calculateMoments(empDist);
-                    const modMoments = calculateMoments(modDist);
-
+                const empMoments = empiricalDists.moments?.[header];
+                const modMoments = modelDists.moments?.[header];
+                if (empMoments && !isNaN(empMoments.mean) && modMoments && !isNaN(modMoments.mean)) {
                     const bias = modMoments.mean - empMoments.mean;
                     const marginalMse = (bias ** 2) + modMoments.variance;
                     totalMse += marginalMse;
+                    numericVarsCount++;
                 }
             });
-            mse = data.headers.length > 0 ? totalMse / data.headers.length : 0;
+            mse = numericVarsCount > 0 ? totalMse / numericVarsCount : NaN;
         }
 
         return {
@@ -843,7 +867,9 @@ export function analyzeData(
         // Multi-variable composite score logic
         modelResults.forEach(res => {
             const { hellingerDistance: hd, meanSquaredError: mse, kullbackLeiblerDivergence: kl } = res.comparison;
-            res.comparison.score = (hd + mse + (isFinite(kl) ? kl / 10 : 1));
+            const validMse = isFinite(mse) ? mse : 0;
+            const validKl = isFinite(kl) ? kl / 10 : 1;
+            res.comparison.score = hd + validMse + validKl;
         });
         result.bestModelName = modelResults.reduce((best, current) => (current.comparison.score ?? Infinity) < (best.comparison.score ?? Infinity) ? current : best).name;
     } else if (modelResults.length > 0) {

@@ -19,15 +19,22 @@ function formatModelResultsForPrompt(results: AnalysisResult): string {
     if (results.isSingleVariable) {
         const summary = results.modelResults.map(res => {
             const wins = res.wins ?? 0;
-            const metrics = res.comparisonMetrics ? `Hellinger: ${res.comparisonMetrics.hellingerDistance.value.toFixed(4)}, MSE: ${res.comparisonMetrics.meanSquaredError.value.toFixed(4)}` : '';
+            const mseValue = res.comparisonMetrics?.meanSquaredError?.value;
+            const mseString = (mseValue !== undefined && isFinite(mseValue)) ? mseValue.toFixed(4) : 'N/A';
+            const hellingerValue = res.comparisonMetrics?.hellingerDistance?.value;
+            const hellingerString = (hellingerValue !== undefined) ? hellingerValue.toFixed(4) : 'N/A';
+
+            const metrics = `Hellinger: ${hellingerString}, MSE: ${mseString}`;
             return `- Model "${res.name}": Won ${wins} metric comparison${wins === 1 ? '' : 's'}. (${metrics})`;
         }).join('\n');
         return `Model Comparison Summary (Best model has most wins):\n${summary}\n- Best fitting model: ${results.bestModelName || 'N/A'}`;
     
     } else { // Multi-variable
-        const summary = results.modelResults.map(res => 
-            `- Model "${res.name}": Composite Score=${res.comparison.score?.toFixed(4)} (Hellinger=${res.comparison.hellingerDistance.toFixed(4)}, MSE=${res.comparison.meanSquaredError.toFixed(4)})`
-        ).join('\n');
+        const summary = results.modelResults.map(res => {
+            const mseValue = res.comparison.meanSquaredError;
+            const mseString = isFinite(mseValue) ? mseValue.toFixed(4) : 'N/A';
+            return `- Model "${res.name}": Composite Score=${res.comparison.score?.toFixed(4)} (Hellinger=${res.comparison.hellingerDistance.toFixed(4)}, MSE=${mseString})`
+        }).join('\n');
         return `Model Comparison Summary (Lower score is better):\n${summary}\n- Best fitting model: ${results.bestModelName || 'N/A'}`;
     }
 }
@@ -40,9 +47,10 @@ export async function getAnalysisExplanation(results: AnalysisResult): Promise<s
 
   const firstVar = results.headers[0];
   const markovData = results.markov ? results.markov[firstVar] : null;
+  const empiricalMoment = results.empirical.moments?.[firstVar];
 
   const empiricalDetails = results.isSingleVariable
-    ? `Mean=${results.empirical.moments?.mean.toFixed(4)}, Variance=${results.empirical.moments?.variance.toFixed(4)}`
+    ? `Mean=${empiricalMoment && !isNaN(empiricalMoment.mean) ? empiricalMoment.mean.toFixed(4) : 'N/A'}, Variance=${empiricalMoment && !isNaN(empiricalMoment.variance) ? empiricalMoment.variance.toFixed(4) : 'N/A'}`
     : `Joint Distribution (Sample): ${formatObjectForPrompt(Object.fromEntries(Object.entries(results.empirical.joint).slice(0, 5)))}`;
 
   const prompt = `
@@ -65,7 +73,7 @@ export async function getAnalysisExplanation(results: AnalysisResult): Promise<s
         - If it's a **single-variable** analysis, explain that the best model is the one that performs best on the highest number of individual metrics (most **wins**).
         - Justify the choice by explaining the metrics:
             - **Hellinger Distance & KL Divergence:** Explain these as measures of the difference between the model's probability distribution and the data's real distribution. Lower is better.
-            - **Mean Squared Error (MSE):** Explain that this is calculated using the bias-variance decomposition (MSE = Bias² + Model Variance). This measures not just error but the model's own internal variance plus its systematic bias (how far its average prediction is from the data's average). For multi-variable cases, the reported MSE is the average of this value across all variables. Lower is better.
+            - **Mean Squared Error (MSE):** Explain that this is calculated using the bias-variance decomposition (MSE = Bias² + Model Variance). This measures not just error but the model's own internal variance plus its systematic bias (how far its average prediction is from the data's average). For multi-variable cases, the reported MSE is the average of this value across all variables. Lower is better. If it is 'N/A', it's because the variable was not numeric.
     2.  **Variable Dependence:** If it's a multi-variable analysis, explain what the Mutual Information value means. A value near 0 implies independence; higher values indicate stronger dependence.
     3.  **Process Characteristics (Advanced Analysis):**
         - **Time Homogeneity:** Explain the test result. If a variable is 'non-homogeneous' (maxDistance > 0.1), it means its behavior changes over time. If 'homogeneous', its properties are stable.

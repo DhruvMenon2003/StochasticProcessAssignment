@@ -60,7 +60,7 @@ export interface CalculatedDistributions {
   marginals: { [key: string]: Distribution };
   conditionals?: ConditionalDistributionTable[];
   conditionalMoments?: ConditionalMomentsTable[];
-  moments?: { mean: number; variance: number }; // For single variable
+  moments?: { [key: string]: { mean: number; variance: number } };
   cmf?: Distribution; // For single variable
 }
 
