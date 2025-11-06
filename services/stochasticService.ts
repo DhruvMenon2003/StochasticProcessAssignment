@@ -13,8 +13,10 @@ import {
   AdvancedTestResult,
   DependenceAnalysisPair,
   TransitionMatrixModelDef,
+  SelfDependenceAnalysis,
+  OrderResult,
 } from '../types';
-import { transpose } from '../utils/mathUtils';
+import { transpose, cartesianProduct, klDivergence } from '../utils/mathUtils';
 import { isTimeSeriesEnsemble } from '../utils/csvParser';
 
 // --- Helper Functions ---
@@ -166,7 +168,153 @@ function compareDistributions(dist1: Distribution, dist2: Distribution): { [metr
 
   hellinger = (1 / Math.sqrt(2)) * Math.sqrt(hellinger);
 
-  return { 'Hellinger Distance': hellinger };
+  return { 'Hellinger Distance': hellinger, 'KL Divergence': klDivergence(dist1, dist2) };
+}
+
+
+// --- Self-Dependence Order Analysis ---
+
+// Memoization cache for conditional distributions to avoid re-computation
+const memo = new Map<string, Map<string, Distribution>>();
+
+function getConditionalDistribution(
+    instanceData: (string|number)[][],
+    targetTimeIndex: number,
+    conditionTimeIndices: number[]
+): Map<string, Distribution> {
+    const memoKey = `${targetTimeIndex}:${conditionTimeIndices.join(',')}`;
+    if (memo.has(memoKey)) {
+        return memo.get(memoKey)!;
+    }
+    
+    const conditionalCounts = new Map<string, Distribution>();
+    const conditionTotals = new Map<string, number>();
+
+    instanceData.forEach(trace => {
+        const conditionKey = conditionTimeIndices.map(i => trace[i]).join('|');
+        const targetValue = trace[targetTimeIndex];
+        
+        if (!conditionalCounts.has(conditionKey)) {
+            conditionalCounts.set(conditionKey, {});
+            conditionTotals.set(conditionKey, 0);
+        }
+        
+        const counts = conditionalCounts.get(conditionKey)!;
+        // FIX: `targetValue` can be a number, but `Distribution` keys are strings.
+        const targetValueKey = String(targetValue);
+        counts[targetValueKey] = (counts[targetValueKey] || 0) + 1;
+        conditionTotals.set(conditionKey, conditionTotals.get(conditionKey)! + 1);
+    });
+
+    const conditionalDist = new Map<string, Distribution>();
+    for (const [key, counts] of conditionalCounts.entries()) {
+        const total = conditionTotals.get(key)!;
+        conditionalDist.set(key, normalize(counts));
+    }
+
+    memo.set(memoKey, conditionalDist);
+    return conditionalDist;
+}
+
+
+function analyzeSelfDependence(instanceData: (string|number)[][], states: (string|number)[]): SelfDependenceAnalysis {
+    memo.clear();
+    const numInstances = instanceData.length;
+    const numTimePoints = instanceData[0].length;
+    const results: OrderResult[] = [];
+
+    // Pre-calculate all necessary conditional distributions
+    const conditionalDistributions: Map<string, Map<string, Distribution>> = new Map();
+    for (let t = 1; t < numTimePoints; t++) {
+        for (let k = 1; k < numTimePoints; k++) {
+            if (t-k < 0) break;
+            const conditionIndices = Array.from({length: k}, (_, i) => t - (i + 1)).reverse();
+            const key = `${t}:${conditionIndices.join(',')}`;
+            conditionalDistributions.set(key, getConditionalDistribution(instanceData, t, conditionIndices));
+        }
+    }
+    const marginalT0 = normalize(getCounts(instanceData.map(trace => trace[0])));
+
+
+    // Calculate joint and marginals for each order
+    for (let order = 1; order <= numTimePoints - 1; order++) {
+        const jointDist: Distribution = {};
+        const allPossibleSequences = cartesianProduct(...Array(numTimePoints).fill(states));
+        
+        allPossibleSequences.forEach(sequence => {
+            let prob = marginalT0[sequence[0]] || 0;
+            if (prob === 0) return;
+
+            for (let t = 1; t < numTimePoints; t++) {
+                const maxLookback = Math.min(t, order);
+                const conditionIndices = Array.from({length: maxLookback}, (_, i) => t - (i + 1)).reverse();
+                const condKey = `${t}:${conditionIndices.join(',')}`;
+                const condDistMap = conditionalDistributions.get(condKey)!;
+
+                const conditionValueKey = conditionIndices.map(i => sequence[i]).join('|');
+                const targetProb = condDistMap.get(conditionValueKey)?.[sequence[t]] || 0;
+                
+                prob *= targetProb;
+                if (prob === 0) break;
+            }
+
+            if (prob > 0) {
+                 jointDist[sequence.join('|')] = prob;
+            }
+        });
+
+        const marginals: { [time: string]: Distribution } = {};
+        const timeHeaders = Array.from({length: numTimePoints}, (_, i) => `T${i+1}`);
+        for (let t = 0; t < numTimePoints; t++) {
+            marginals[timeHeaders[t]] = getMarginal(jointDist, timeHeaders, t);
+        }
+        
+        results.push({ order, avgHellinger: 0, avgKlDivergence: 0, marginals });
+    }
+
+    const fullPastResult = results[results.length - 1];
+
+    // Compare each order's marginals to the full past marginals
+    results.forEach(res => {
+        if (res.order === numTimePoints - 1) { // This is the full past model itself
+             res.avgHellinger = 0;
+             res.avgKlDivergence = 0;
+             return;
+        }
+
+        let totalHellinger = 0;
+        let totalKl = 0;
+        for (let t = 0; t < numTimePoints; t++) {
+             const timeHeader = `T${t+1}`;
+             const metrics = compareDistributions(res.marginals[timeHeader], fullPastResult.marginals[timeHeader]);
+             totalHellinger += metrics['Hellinger Distance'];
+             totalKl += metrics['KL Divergence'];
+        }
+        res.avgHellinger = totalHellinger / numTimePoints;
+        res.avgKlDivergence = totalKl / numTimePoints;
+    });
+
+    // Generate conclusion
+    let conclusion = "The analysis could not determine a specific order of dependence. The process may be complex or data may be too sparse.";
+    if (results.length > 1) {
+        const highOrderResult = results[results.length-2]; // n-2 order
+        let bestOrder = 1;
+        for(let i=0; i < results.length - 2; i++) {
+            const currentOrderResult = results[i];
+            // If the distance for this order is very close to the high order distance, it's a good candidate
+            if (Math.abs(currentOrderResult.avgHellinger - highOrderResult.avgHellinger) < 0.01) {
+                bestOrder = currentOrderResult.order;
+                break;
+            }
+        }
+         conclusion = `The process appears to be of **${bestOrder}-order**. The ${bestOrder}-order model's marginal distributions are very close to those of a high-order model, suggesting that memory beyond ${bestOrder} step(s) does not significantly alter the process's long-term behavior.`;
+         if(bestOrder === 1) {
+             conclusion = `The process appears to be **Markovian (1st-order)**. The Markovian model's marginal distributions are very close to those of a high-order model, suggesting that the process has limited memory and the current state is primarily dependent on the immediately preceding state.`;
+         }
+    }
+
+
+    return { orders: results.slice(0, -1), conclusion };
 }
 
 
@@ -176,6 +324,9 @@ function analyzeTimeSeriesEnsemble(
     options: AnalysisOptions
 ): AnalysisResult {
     const instanceData = transpose(data.rows.map(row => row.slice(1)));
+    if (instanceData.length === 0 || instanceData[0].length < 2) {
+        throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
+    }
     const allStates = Array.from(new Set(instanceData.flat())).sort();
     const stateIndex = new Map(allStates.map((s, i) => [s, i]));
     const n = allStates.length;
@@ -225,10 +376,9 @@ function analyzeTimeSeriesEnsemble(
         }
     });
 
-    const advancedTests: AdvancedTestResult | undefined = (options.runMarkovOrderTest || options.runTimeHomogeneityTest) ? {
-      markovOrderTest: options.runMarkovOrderTest ? { ["Process"]: { isFirstOrder: true, pValue: 0.1, details: "The process appears to be first-order Markov."}} : undefined,
-      timeHomogeneityTest: options.runTimeHomogeneityTest ? { ["Process"]: { isHomogeneous: false, pValue: 0.02, details: "The process appears to be non-homogeneous over time."}} : undefined,
-    } : undefined;
+    const selfDependenceAnalysis = options.runMarkovOrderTest 
+        ? analyzeSelfDependence(instanceData, allStates) 
+        : undefined;
 
 
     return {
@@ -238,7 +388,7 @@ function analyzeTimeSeriesEnsemble(
         isEnsemble: true,
         ensembleStates: allStates,
         empiricalTransitionMatrix: empiricalMatrix,
-        advancedTests,
+        selfDependenceAnalysis,
     }
 }
 

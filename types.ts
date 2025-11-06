@@ -70,6 +70,17 @@ export interface ModelAnalysisResult {
   matrix?: (number|null)[][]; // For showing theoretical TM
 }
 
+export interface OrderResult {
+  order: number;
+  avgHellinger: number;
+  avgKlDivergence: number;
+  marginals: { [time: string]: Distribution };
+}
+
+export interface SelfDependenceAnalysis {
+  orders: OrderResult[];
+  conclusion: string;
+}
 
 export interface AnalysisResult {
   headers: string[];
@@ -85,6 +96,7 @@ export interface AnalysisResult {
   isEnsemble?: boolean;
   ensembleStates?: (string | number)[];
   empiricalTransitionMatrix?: number[][];
+  selfDependenceAnalysis?: SelfDependenceAnalysis;
 }
 
 export interface DependenceMetrics {

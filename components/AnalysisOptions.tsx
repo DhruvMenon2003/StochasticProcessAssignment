@@ -28,17 +28,10 @@ export const AnalysisOptions: React.FC<AnalysisOptionsProps> = ({ options, setOp
       </p>
       <div className="space-y-4">
         <ToggleSwitch
-          label="Self-Dependence Test"
-          description="Tests if the process has memory (1st-order Markov property)."
+          label="Analyze Dependence Order"
+          description="Calculates process memory depth (1st, 2nd, ... order)."
           enabled={options.runMarkovOrderTest}
           onChange={() => handleToggle('runMarkovOrderTest')}
-          disabled={disabled}
-        />
-        <ToggleSwitch
-          label="Time Homogeneity Test"
-          description="Tests if the process behavior is stable over time."
-          enabled={options.runTimeHomogeneityTest}
-          onChange={() => handleToggle('runTimeHomogeneityTest')}
           disabled={disabled}
         />
       </div>

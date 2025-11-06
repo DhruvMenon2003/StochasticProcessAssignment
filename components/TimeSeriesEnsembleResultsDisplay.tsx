@@ -2,6 +2,7 @@ import React from 'react';
 import { AnalysisResult } from '../types';
 import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
 import { TransitionMatrixDisplay } from './TransitionMatrixDisplay';
+import { SelfDependenceDisplay } from './SelfDependenceDisplay';
 
 interface TimeSeriesEnsembleResultsDisplayProps {
   results: AnalysisResult;
@@ -54,11 +55,10 @@ export const TimeSeriesEnsembleResultsDisplay: React.FC<TimeSeriesEnsembleResult
 
       </div>
 
-
-      {results.advancedTests && (
+      {results.selfDependenceAnalysis && (
         <div>
            <h3 className="text-2xl font-bold text-gray-100 mb-4">Advanced Diagnostics</h3>
-           <AdvancedAnalysisDisplay results={results.advancedTests} />
+           <SelfDependenceDisplay analysis={results.selfDependenceAnalysis} />
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
@@ -87,11 +88,13 @@ function App() {
     }
 
     const uniqueStates: { [key: string]: Set<string | number> } = {};
-    parsedData.headers.forEach(h => {
+    // FIX: Add explicit type for `h` to prevent it from being inferred as `unknown`.
+    parsedData.headers.forEach((h: string) => {
       uniqueStates[h] = new Set();
     });
 
-    const headerIndexMap = new Map(parsedData.headers.map((h, i) => [h, i]));
+    // FIX: Add explicit types for `h` and `i` to prevent them from being inferred as `unknown`.
+    const headerIndexMap = new Map(parsedData.headers.map((h: string, i: number) => [h, i]));
 
     // Fix: Add explicit types for row and h to prevent `unknown` type inference which can cause indexing errors.
     parsedData.rows.forEach((row: (string | number)[]) => {
@@ -103,7 +106,8 @@ function App() {
       });
     });
 
-    return parsedData.headers.map(h => ({
+    // FIX: Add explicit type for `h` to prevent it from being inferred as `unknown`.
+    return parsedData.headers.map((h: string) => ({
       name: h,
       states: Array.from(uniqueStates[h]).sort().join(', '),
     }));
