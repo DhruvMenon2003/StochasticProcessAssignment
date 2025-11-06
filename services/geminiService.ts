@@ -1,7 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
-// FIX: TimeSeriesEnsembleAnalysis is not exported from stochasticService. Import it and StandardAnalysisResult from types.
-import { AnalysisResult } from './stochasticService';
-import { StandardAnalysisResult, TimeSeriesEnsembleAnalysis } from '../types';
+// FIX: To resolve issues with discriminated union type narrowing, all related types are now imported directly from the `types` file.
+import { AnalysisResult, StandardAnalysisResult, TimeSeriesEnsembleAnalysis } from '../types';
 
 const API_KEY = process.env.API_KEY;
 
@@ -14,10 +13,11 @@ function formatObjectForPrompt(obj: any): string {
 }
 
 function formatModelResultsForPrompt(results: AnalysisResult): string {
-    // FIX: Type-guard for TimeSeriesEnsembleAnalysis before accessing properties of StandardAnalysisResult to prevent type errors.
+    // FIX: Restructure with an explicit if/else block to help TypeScript correctly narrow the discriminated union type.
     if (results.isTimeSeriesEnsemble) {
         return "No models were provided for comparison.";
     }
+
     if (!results.modelResults || results.modelResults.length === 0) {
         return "No models were provided for comparison.";
     }
@@ -39,43 +39,40 @@ function formatModelResultsForPrompt(results: AnalysisResult): string {
 
 function generateTimeSeriesPrompt(results: TimeSeriesEnsembleAnalysis): string {
     const firstState = results.states[0];
-    const firstTimeStep = results.timeSteps[0];
-    const firstUnconditionalProb = results.plotData[String(firstState)]?.unconditional[0];
+    const secondState = results.states[1] || results.states[0];
+    const firstTimeStepIndex = results.transitionProbabilitiesOverTime[firstState]?.[secondState]?.findIndex(p => p !== null) ?? -1;
+    const firstTimeStep = firstTimeStepIndex !== -1 ? results.timeSteps[firstTimeStepIndex] : 'N/A';
+    const exampleProb = firstTimeStepIndex !== -1 ? results.transitionProbabilitiesOverTime[firstState][secondState][firstTimeStepIndex] : null;
 
     const prompt = `
     You are an expert in stochastic processes and data analysis, acting as a teaching assistant for a university course.
     Your tone should be helpful, insightful, and clear.
-    A student has performed a specialized time-series ensemble analysis on their dataset. Here are the results:
+    A student has performed a time-series ensemble analysis. Here are the results:
 
-    - Analysis Type: Time-Series Ensemble Analysis on multiple instances of a process.
+    - Analysis Type: Time-Series Ensemble Analysis, focusing on the evolution of transition probabilities.
     - Process States: ${results.states.join(', ')}
-    - Example Data Point: The unconditional probability of being in state '${firstState}' at time '${firstTimeStep}' is approx ${firstUnconditionalProb?.toFixed(4)}.
+    - Example Data Point: At time '${firstTimeStep}', the probability of transitioning to state '${firstState}' from state '${secondState}' was ${exampleProb?.toFixed(4)}.
     - Time Homogeneity Test Results (on Instance1): ${formatObjectForPrompt(results.timeHomogeneityTest)}
     - Self-Dependence (Markov Order) Test Results (on Instance1): ${formatObjectForPrompt(results.markovOrderTest)}
     
-    The primary output is a set of charts, one for each state, showing how different probability estimates evolve over time. The key is to compare the lines on these charts.
-    Based on the analysis concept, provide a concise summary and interpretation for the student. Structure your response with the following sections:
-    1.  **Self-Dependence Analysis (The Charts):** Explain the purpose of the charts. They are designed to visually test for the Markov property and understand the "memory" of the process. Explain each line:
-        - **P(Xt) (Unconditional):** The baseline probability of being in a state at a given time, ignoring all history.
-        - **P(Xt|Xt-1) (First-Order Conditional):** The probability estimated using only the immediately preceding state.
-        - **P(Xt|Xt-1, Xt-2) (Second-Order Conditional):** Probability estimated using the two preceding states.
-        - **P(Xt|X1...Xt-1) (Full Past Conditional):** The "true" conditional probability estimated using the entire history up to that point. This line represents the most accurate prediction based on the available data.
+    The main output is a set of charts, one for each state, showing how the probability of transitioning TO that state evolves over time.
+    Based on these results, provide a concise summary and interpretation for the student. Structure your response with the following sections:
+    1.  **Transition Probability Evolution (The Charts):** Explain the purpose of the charts. Each chart focuses on a single "destination" state and shows the probability of arriving there.
+        - Explain what each line represents: Each colored line shows the probability of transitioning TO the destination state FROM a specific "source" state in the previous time step. For example, in the chart for "State A", the blue line might show P(Xt = A | Xt-1 = A), the green line P(Xt = A | Xt-1 = B), and so on.
     2.  **How to Interpret the Charts:** This is the most important part.
-        - If all lines are very close together, it suggests the process is **memoryless** (or independent), as knowing the history doesn't change the probability estimate.
-        - If the **P(Xt|Xt-1)** line is very close to the **Full Past** line, it's strong evidence that the process is **First-Order Markov**. This means only the most recent state matters for predicting the future.
-        - If the **P(Xt|Xt-2, Xt-1)** line is close to the **Full Past** line, but the first-order line is not, it suggests a **Second-Order Markov** process.
-        - Divergence between the lines indicates the importance of history. The more the simpler conditional lines (like P(Xt|Xt-1)) deviate from the Full Past line, the more complex the process's memory is.
+        - **Dependence on Previous State:** If the lines for different "from" states are far apart, it means the previous state has a strong influence on the next state. If the lines are all clustered together, the process is less dependent on its immediate past.
+        - **Time Homogeneity:** If the lines are relatively flat, it means the transition probabilities are stable over time (time-homogeneous). If the lines show clear trends (upward, downward) or are very volatile, it suggests the process's underlying rules are changing over time (non-homogeneous). This visual finding can be confirmed with the formal "Time Homogeneity Test".
+        - **State Attractors/Repellers:** A consistently high line for P(Xt = A | Xt-1 = A) suggests that state A is "sticky" or an attractor. A consistently low line for P(Xt = A | Xt-1 = B) suggests that state B tends to transition away from A.
     3.  **Process Characteristics (Advanced Analysis):**
-        - **Time Homogeneity:** Explain the test result for Instance1. If 'non-homogeneous', it means the process's transition rules may be changing over time. If 'homogeneous', its properties are stable.
-        - **Self-Dependence:** Explain the Markov Order test for Instance1. If 'Has Memory' (Markovian), it confirms that its future state depends on its present state, supporting the visual findings from the chart.
-    4.  **Conclusion:** Conclude with a final summary and tell the student to examine the charts for each state to see if the Markovian properties are consistent across the entire state space.
+        - **Time Homogeneity Test:** Briefly explain the formal test result and how it confirms or contradicts the visual evidence from the charts. If 'non-homogeneous', the transition rules are changing.
+        - **Self-Dependence Test:** Explain what the "Has Memory" (Markovian) result means. It confirms that the process's states are not just random, but that the past state influences the future state, which is the very thing being visualized in the charts.
+    4.  **Conclusion:** Conclude with a final summary. Tell the student to look for patterns across all charts to understand the overall dynamics of the system. For example, is one state an attractor for all other states? Does the whole system's behavior change after a certain point in time?
 
     Keep the entire response well-structured and focused on teaching the student how to interpret their specific results.
     `;
     return prompt;
 }
 
-// FIX: Change parameter type to StandardAnalysisResult to allow access to its properties without type errors.
 function generateStandardPrompt(results: StandardAnalysisResult): string {
     const firstVar = results.headers[0];
     const markovData = results.markov ? results.markov[firstVar] : null;
@@ -122,6 +119,7 @@ export async function getAnalysisExplanation(results: AnalysisResult): Promise<s
     return `Analysis Complete. This is a placeholder summary. To get an AI-powered explanation, please configure your Gemini API key. The analysis metrics provide a quantitative measure of how well any provided models fit the empirical data.`;
   }
 
+  // FIX: Use an if/else block instead of a ternary operator to ensure proper type narrowing of the 'AnalysisResult' discriminated union.
   const prompt = results.isTimeSeriesEnsemble
     ? generateTimeSeriesPrompt(results)
     : generateStandardPrompt(results);

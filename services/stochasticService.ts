@@ -1,4 +1,4 @@
-import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics, ConditionalMomentsTable, StandardAnalysisResult, TimeSeriesEnsembleAnalysis, MarkovOrderResult, TimeHomogeneityResult, TimeSeriesPlotData, AnalysisResult as AnalysisResultType } from '../types';
+import { CsvData, ProbabilityModel, Distribution, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics, ConditionalMomentsTable, StandardAnalysisResult, TimeSeriesEnsembleAnalysis, MarkovOrderResult, TimeHomogeneityResult, TransitionProbabilitiesOverTime, AnalysisResult as AnalysisResultType } from '../types';
 import { cartesianProduct, transpose } from '../utils/mathUtils';
 
 // --- Interfaces for analysis results ---
@@ -459,135 +459,68 @@ export function isTimeSeriesEnsemble(headers: string[]): boolean {
   return true;
 }
 
-function analyzeTimeSeriesEnsemble(data: CsvData, options: AnalysisOptions): TimeSeriesEnsembleAnalysis {
+function analyzeTimeSeriesEnsemble(data: CsvData): TimeSeriesEnsembleAnalysis {
     const timeSteps = data.rows.map(r => r[0]);
     const instanceData = data.rows.map(row => row.slice(1));
-    const ensemble = transpose(instanceData);
+    const ensemble = transpose(instanceData); // Each row is an instance
     const numInstances = ensemble.length;
     const numTimes = timeSteps.length;
     
+    if (numInstances === 0 || numTimes === 0) {
+        throw new Error("Time-series data has no instances or no time steps.");
+    }
+    
     const allStates = Array.from(new Set(ensemble.flat())).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
 
-    const plotData: { [state: string]: TimeSeriesPlotData } = {};
-    allStates.forEach(s => {
-        plotData[String(s)] = {
-            time: timeSteps,
-            unconditional: Array(numTimes).fill(null),
-            firstOrder: Array(numTimes).fill(null),
-            secondOrder: Array(numTimes).fill(null),
-            fullPast: Array(numTimes).fill(null),
-        };
+    const transitionProbs: TransitionProbabilitiesOverTime = {};
+    allStates.forEach(targetState => {
+        transitionProbs[String(targetState)] = {};
+        allStates.forEach(fromState => {
+            // Transitions are from t-1 to t, so probs exist from time index 1 onwards.
+            transitionProbs[String(targetState)][String(fromState)] = Array(numTimes).fill(null);
+        });
     });
 
-    // P(Xt)
-    for (let t = 0; t < numTimes; t++) {
-        const counts = allStates.reduce((acc, s) => ({ ...acc, [String(s)]: 0 }), {});
-        for (let i = 0; i < numInstances; i++) {
-            counts[String(ensemble[i][t])]++;
-        }
+    // Calculate probabilities for each time step t > 0
+    for (let t = 1; t < numTimes; t++) {
+        const fromCounts: { [state: string]: number } = {};
+        const transitionCounts: { [from: string]: { [to: string]: number } } = {};
+
+        // Initialize counts for this time step
         allStates.forEach(s => {
-            plotData[String(s)].unconditional[t] = counts[String(s)] / numInstances;
+            fromCounts[String(s)] = 0;
+            transitionCounts[String(s)] = {};
+            allStates.forEach(s2 => {
+                transitionCounts[String(s)][String(s2)] = 0;
+            });
+        });
+
+        // Aggregate counts across the ensemble for transition t-1 -> t
+        for (let i = 0; i < numInstances; i++) {
+            const fromState = String(ensemble[i][t-1]);
+            const toState = String(ensemble[i][t]);
+            fromCounts[fromState]++;
+            transitionCounts[fromState][toState]++;
+        }
+
+        // Calculate probabilities and store them at index t
+        allStates.forEach(targetState => {
+            allStates.forEach(fromState => {
+                const fromTotal = fromCounts[String(fromState)];
+                if (fromTotal > 0) {
+                    const count = transitionCounts[String(fromState)][String(targetState)];
+                    transitionProbs[String(targetState)][String(fromState)][t] = count / fromTotal;
+                }
+            });
         });
     }
-
-    // P(Xt | X_t-1)
-    const t1Counts = {};
-    for (const s1 of allStates) {
-        t1Counts[String(s1)] = allStates.reduce((acc, s2) => ({ ...acc, [String(s2)]: 0 }), { total: 0 });
-    }
-    for (let i = 0; i < numInstances; i++) {
-        for (let t = 1; t < numTimes; t++) {
-            const prev = String(ensemble[i][t-1]), curr = String(ensemble[i][t]);
-            t1Counts[prev][curr]++;
-            t1Counts[prev].total++;
-        }
-    }
-    const t1Probs = {};
-    for (const s1 in t1Counts) {
-        t1Probs[s1] = {};
-        for (const s2 in t1Counts[s1]) {
-            if (s2 !== 'total') t1Probs[s1][s2] = t1Counts[s1].total > 0 ? t1Counts[s1][s2] / t1Counts[s1].total : 0;
-        }
-    }
-    for (let t = 1; t < numTimes; t++) {
-        const avgPreds = allStates.reduce((acc, s) => ({ ...acc, [String(s)]: 0 }), {});
-        for (let i = 0; i < numInstances; i++) {
-            const prev = String(ensemble[i][t-1]);
-            for (const s of allStates) {
-                avgPreds[String(s)] += t1Probs[prev]?.[String(s)] || 0;
-            }
-        }
-        allStates.forEach(s => plotData[String(s)].firstOrder[t] = avgPreds[String(s)] / numInstances);
-    }
-
-    // P(Xt | X_t-1, X_t-2)
-    const t2Counts = {};
-     for (const s1 of allStates) {
-        t2Counts[String(s1)] = {};
-        for (const s2 of allStates) {
-            t2Counts[String(s1)][String(s2)] = allStates.reduce((acc, s3) => ({ ...acc, [String(s3)]: 0 }), { total: 0 });
-        }
-    }
-    for (let i = 0; i < numInstances; i++) {
-        for (let t = 2; t < numTimes; t++) {
-            const p2 = String(ensemble[i][t-2]), p1 = String(ensemble[i][t-1]), curr = String(ensemble[i][t]);
-            t2Counts[p2][p1][curr]++;
-            t2Counts[p2][p1].total++;
-        }
-    }
-    const t2Probs = {};
-    for (const s2 in t2Counts) for (const s1 in t2Counts[s2]) {
-        if (!t2Probs[s2]) t2Probs[s2] = {};
-        t2Probs[s2][s1] = {};
-        for (const s3 in t2Counts[s2][s1]) {
-            if (s3 !== 'total') t2Probs[s2][s1][s3] = t2Counts[s2][s1].total > 0 ? t2Counts[s2][s1][s3] / t2Counts[s2][s1].total : 0;
-        }
-    }
-    for (let t = 2; t < numTimes; t++) {
-        const avgPreds = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
-        for (let i = 0; i < numInstances; i++) {
-            const p2 = String(ensemble[i][t-2]), p1 = String(ensemble[i][t-1]);
-            for (const s of allStates) {
-                avgPreds[String(s)] += t2Probs[p2]?.[p1]?.[String(s)] || 0;
-            }
-        }
-        allStates.forEach(s => plotData[String(s)].secondOrder[t] = avgPreds[String(s)] / numInstances);
-    }
     
-    // P(Xt | X_1, ..., X_t-1)
-    for (let t = 1; t < numTimes; t++) {
-        const avgPreds = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
-        const historyGroups = new Map();
-        for (let i = 0; i < numInstances; i++) {
-            const historyKey = ensemble[i].slice(0, t).join('|');
-            if (!historyGroups.has(historyKey)) historyGroups.set(historyKey, []);
-            historyGroups.get(historyKey).push(i);
-        }
-        for (let i = 0; i < numInstances; i++) {
-            const historyKey = ensemble[i].slice(0, t).join('|');
-            const group = historyGroups.get(historyKey);
-            const counts = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
-            if (group) {
-                for (const memberIndex of group) {
-                    if (t < numTimes) counts[String(ensemble[memberIndex][t])]++;
-                }
-                for (const s of allStates) {
-                     avgPreds[String(s)] += group.length > 0 ? counts[String(s)] / group.length : 0;
-                }
-            }
-        }
-        allStates.forEach(s => plotData[String(s)].fullPast[t] = avgPreds[String(s)] / numInstances);
-    }
-    
-    let timeHomogeneityTest: TimeHomogeneityResult, markovOrderTest: MarkovOrderResult;
-    const representativeSeries = ensemble[0];
+    const timeHomogeneityTest: TimeHomogeneityResult = {};
+    const markovOrderTest: MarkovOrderResult = {};
+    const representativeSeries = ensemble[0]; // Run tests on the first instance as a sample
     if (representativeSeries) {
-        if (options.runTimeHomogeneityTest) {
-            timeHomogeneityTest = { 'Instance1': testTimeHomogeneity(representativeSeries) };
-        }
-        if (options.runMarkovOrderTest) {
-            markovOrderTest = { 'Instance1': analyzeMarkovOrder(representativeSeries) };
-        }
+        timeHomogeneityTest['Instance1'] = testTimeHomogeneity(representativeSeries);
+        markovOrderTest['Instance1'] = analyzeMarkovOrder(representativeSeries);
     }
 
     return {
@@ -595,7 +528,7 @@ function analyzeTimeSeriesEnsemble(data: CsvData, options: AnalysisOptions): Tim
       headers: ['Time', 'Instances'],
       timeSteps,
       states: allStates,
-      plotData,
+      transitionProbabilitiesOverTime: transitionProbs,
       timeHomogeneityTest,
       markovOrderTest,
     };
@@ -605,13 +538,12 @@ function analyzeTimeSeriesEnsemble(data: CsvData, options: AnalysisOptions): Tim
 // --- Main Analysis Function ---
 export function analyzeData(
     data: CsvData, 
-    models: {name: string, model: ProbabilityModel}[],
-    options: AnalysisOptions
+    models: {name: string, model: ProbabilityModel}[]
 ): AnalysisResult {
   if (data.rows.length === 0) throw new Error("Dataset has no rows to analyze.");
   
   if (isTimeSeriesEnsemble(data.headers)) {
-      return analyzeTimeSeriesEnsemble(data, options);
+      return analyzeTimeSeriesEnsemble(data);
   }
 
   const isSingleVariable = data.headers.length === 1;
@@ -684,30 +616,6 @@ export function analyzeData(
       }
   }
   result.dependenceAnalysis = dependenceAnalyses;
-
-  if (options.runTimeHomogeneityTest) {
-      const thResults: TimeHomogeneityResult = {};
-      data.headers.forEach((h, i) => { thResults[h] = testTimeHomogeneity(data.rows.map(r => r[i])); });
-      result.timeHomogeneityTest = thResults;
-  }
-   if (options.runMarkovOrderTest) {
-      const moResults: MarkovOrderResult = {};
-      data.headers.forEach((h, i) => { moResults[h] = analyzeMarkovOrder(data.rows.map(r => r[i])); });
-      result.markovOrderTest = moResults;
-      
-      if (data.rows.length > 1) {
-        const markovResult: MarkovResult = {};
-        data.headers.forEach((header, index) => {
-            const series = data.rows.map(row => row[index]);
-            const { states, matrix } = getTransitionMatrix(series);
-            if (states.length > 0) {
-                const stationaryDistribution = getStationaryDistribution(matrix, states);
-                markovResult[header] = { states, transitionMatrix: matrix, stationaryDistribution };
-            }
-        });
-        result.markov = markovResult;
-      }
-  }
 
   if (models.length > 0) {
     const rawModelResults = models.map(({name, model}) => {

@@ -32,6 +32,7 @@ export interface ModelDef {
   modelString: string;
 }
 
+// FIX: Add and export AnalysisOptions type for AnalysisOptions.tsx component.
 export interface AnalysisOptions {
   runMarkovOrderTest: boolean;
   runTimeHomogeneityTest: boolean;
@@ -100,12 +101,10 @@ export interface DependenceAnalysisPair {
 
 // --- New Types for Time-Series Ensemble Analysis ---
 
-export interface TimeSeriesPlotData {
-  time: (string|number)[];
-  unconditional: (number | null)[];
-  firstOrder: (number | null)[];
-  secondOrder: (number | null)[];
-  fullPast: (number | null)[];
+export interface TransitionProbabilitiesOverTime {
+    [targetState: string]: {
+        [fromState: string]: (number | null)[];
+    };
 }
 
 export interface TimeHomogeneityResult {
@@ -128,11 +127,9 @@ export interface TimeSeriesEnsembleAnalysis {
   headers: string[]; // ['Time', 'Instances']
   timeSteps: (string|number)[];
   states: (string|number)[];
-  plotData: {
-    [state: string]: TimeSeriesPlotData;
-  };
-  timeHomogeneityTest?: TimeHomogeneityResult;
-  markovOrderTest?: MarkovOrderResult;
+  transitionProbabilitiesOverTime: TransitionProbabilitiesOverTime;
+  timeHomogeneityTest: TimeHomogeneityResult;
+  markovOrderTest: MarkovOrderResult;
 }
 
 export interface StandardAnalysisResult {
@@ -146,9 +143,10 @@ export interface StandardAnalysisResult {
     mutualInformation: number | null;
   };
   markov?: any; // Using `any` to avoid circular dependency with stochasticService types
+  dependenceAnalysis?: DependenceAnalysisPair[];
+  // FIX: Add optional properties to align with usage in components and services.
   timeHomogeneityTest?: TimeHomogeneityResult;
   markovOrderTest?: MarkovOrderResult;
-  dependenceAnalysis?: DependenceAnalysisPair[];
 }
 
 export type AnalysisResult = StandardAnalysisResult | TimeSeriesEnsembleAnalysis;

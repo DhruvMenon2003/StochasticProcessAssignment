@@ -5,9 +5,8 @@ import { CalculatorIcon } from './components/icons/CalculatorIcon';
 import { parseCsvData } from './utils/csvParser';
 import { analyzeData, AnalysisResult, isTimeSeriesEnsemble } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, ModelDef, VariableDef, AnalysisOptions } from './types';
+import { CsvData, ModelDef, VariableDef } from './types';
 import { ModelsManager } from './components/ModelsManager';
-import { AnalysisOptions as AnalysisOptionsComponent } from './components/AnalysisOptions';
 import { NewFileIcon } from './components/icons/NewFileIcon';
 
 // Helper to load session from localStorage
@@ -34,13 +33,6 @@ export default function App() {
     }));
   });
   const [templateVariables, setTemplateVariables] = useState<VariableDef[]>([]);
-  const [analysisOptions, setAnalysisOptions] = useState<AnalysisOptions>(() => {
-      const sessionData = loadSession();
-      return sessionData?.analysisOptions || {
-        runMarkovOrderTest: false,
-        runTimeHomogeneityTest: false,
-      };
-  });
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -59,13 +51,6 @@ export default function App() {
       const data = parseCsvData(csvString);
       const isTs = isTimeSeriesEnsemble(data.headers);
       setIsTimeSeriesMode(isTs);
-      if (isTs) {
-          // auto-enable options for this mode
-          setAnalysisOptions({
-              runMarkovOrderTest: true,
-              runTimeHomogeneityTest: true,
-          });
-      }
     } catch (e) {
       setIsTimeSeriesMode(false);
     }
@@ -119,7 +104,6 @@ export default function App() {
           const sessionData = {
             csvString,
             models: modelsToSave,
-            analysisOptions,
           };
           localStorage.setItem('stochastic-session', JSON.stringify(sessionData));
           
@@ -138,7 +122,7 @@ export default function App() {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
     };
-  }, [csvString, models, analysisOptions]);
+  }, [csvString, models]);
 
 
   const handleNewSession = useCallback(() => {
@@ -147,7 +131,6 @@ export default function App() {
     setAnalysisResult(null);
     setExplanation(null);
     setError(null);
-    setAnalysisOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
     try {
       localStorage.removeItem('stochastic-session');
     } catch (e) {
@@ -183,7 +166,7 @@ export default function App() {
           model: JSON.parse(m.modelString)
         }));
 
-      const results = analyzeData(data, parsedModels, analysisOptions);
+      const results = analyzeData(data, parsedModels);
       setAnalysisResult(results);
 
       const geminiExplanation = await getAnalysisExplanation(results);
@@ -194,7 +177,7 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [csvString, models, analysisOptions]);
+  }, [csvString, models]);
 
   const hasAnyInvalidModel = models.some(m => !!m.error);
 
@@ -231,7 +214,7 @@ export default function App() {
           {isTimeSeriesMode ? (
             <div className="text-center p-4 bg-blue-900/30 border border-blue-700 rounded-lg">
                 <p className="font-semibold text-blue-300">Time Series Ensemble Mode Detected</p>
-                <p className="text-sm text-blue-400">A specialized self-dependence analysis will be performed. Model definition is disabled.</p>
+                <p className="text-sm text-blue-400">A specialized self-dependence and time-homogeneity analysis will be performed. Model definition is disabled.</p>
             </div>
           ) : (
             <ModelsManager 
@@ -240,12 +223,6 @@ export default function App() {
               templateVariables={templateVariables}
             />
           )}
-
-          <AnalysisOptionsComponent
-            options={analysisOptions}
-            setOptions={setAnalysisOptions}
-            disabled={isTimeSeriesMode}
-          />
         </div>
 
         <div className="text-center mt-10">

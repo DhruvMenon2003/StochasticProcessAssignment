@@ -33,17 +33,19 @@ export const TimeSeriesResultsDisplay: React.FC<TimeSeriesResultsDisplayProps> =
       <div>
         <div className="flex items-center mb-4">
             <ChartLineIcon className="h-7 w-7 text-teal-400 mr-3" />
-            <h3 className="text-2xl font-bold text-gray-100">Self-Dependence Analysis by State</h3>
+            <h3 className="text-2xl font-bold text-gray-100">Transition Probability Evolution by Target State</h3>
         </div>
         <p className="text-gray-400 mb-6 -mt-2 text-sm">
-            These charts compare different probability estimates to visualize the process's memory. If conditional probability lines converge with the "Full Past" line, it indicates a simpler Markov process.
+            These charts show the probability of transitioning TO a specific state (e.g., State A) FROM every other state, at each point in time. This helps visualize the process dynamics and time-homogeneity.
         </p>
         <div className="space-y-8">
-            {results.states.map(state => (
-                <div key={String(state)} className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
+            {Object.entries(results.transitionProbabilitiesOverTime).map(([targetState, data]) => (
+                <div key={targetState} className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
                     <SelfDependenceChart
-                        title={`State: ${String(state)}`}
-                        data={results.plotData[String(state)]}
+                        title={`Evolution of P(Xt = ${targetState} | Xt-1)`}
+                        timeSteps={results.timeSteps}
+                        data={data}
+                        states={results.states}
                     />
                 </div>
             ))}

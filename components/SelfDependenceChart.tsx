@@ -1,23 +1,16 @@
 import React from 'react';
-import { TimeSeriesPlotData } from '../types';
 
-interface SelfDependenceChartProps {
+interface TransitionEvolutionChartProps {
     title: string;
-    data: TimeSeriesPlotData;
+    timeSteps: (string|number)[];
+    data: { [fromState: string]: (number|null)[] };
+    states: (string|number)[];
 }
 
-const COLORS = {
-  unconditional: '#10B981', // Green-500
-  firstOrder: '#8B5CF6',    // Violet-500
-  secondOrder: '#EC4899',   // Pink-500
-  fullPast: '#F97316',      // Orange-500
-};
-
-const LABELS = {
-  unconditional: 'P(Xt)',
-  firstOrder: 'P(Xt|Xt-1)',
-  secondOrder: 'P(Xt|Xt-1,Xt-2)',
-  fullPast: 'P(Xt|X1...Xt-1)',
+const generatePastelColor = (seed: number, total: number) => {
+    // Generate evenly spaced hues for better color distinction
+    const hue = (seed * (360 / (total + 1))) % 360;
+    return `hsl(${hue}, 70%, 70%)`;
 };
 
 const getPathData = (series: (number | null)[], xScale: (i: number) => number, yScale: (p: number) => number): string => {
@@ -41,7 +34,7 @@ const getPathData = (series: (number | null)[], xScale: (i: number) => number, y
 };
 
 
-export const SelfDependenceChart: React.FC<SelfDependenceChartProps> = ({ title, data }) => {
+export const SelfDependenceChart: React.FC<TransitionEvolutionChartProps> = ({ title, timeSteps, data, states }) => {
     const width = 600;
     const height = 300;
     const margin = { top: 20, right: 20, bottom: 50, left: 50 };
@@ -49,17 +42,13 @@ export const SelfDependenceChart: React.FC<SelfDependenceChartProps> = ({ title,
     const chartHeight = height - margin.top - margin.bottom;
     const numTicks = 5;
 
-    const allProbs = [
-        ...data.unconditional,
-        ...data.firstOrder,
-        ...data.secondOrder,
-        ...data.fullPast,
-    ].filter(p => p !== null) as number[];
+    const fromStates = Object.keys(data);
+    const stateColorMap = new Map(states.map((s, i) => [String(s), generatePastelColor(i, states.length)]));
     
-    const maxY = allProbs.length > 0 ? Math.max(...allProbs) : 1;
-    const yDomainMax = Math.min(1, Math.ceil(maxY * 10) / 10); // Round up to next 0.1, max 1
+    // Y domain is always 0 to 1 for probabilities
+    const yDomainMax = 1.0;
     
-    const xScale = (index: number) => (index / (data.time.length - 1)) * chartWidth;
+    const xScale = (index: number) => (index / (timeSteps.length - 1)) * chartWidth;
     const yScale = (prob: number) => chartHeight - (prob / yDomainMax) * chartHeight;
 
     return (
@@ -76,7 +65,7 @@ export const SelfDependenceChart: React.FC<SelfDependenceChartProps> = ({ title,
                                 <g key={i} className="text-gray-400">
                                     <line x1={0} y1={y} x2={chartWidth} y2={y} stroke="currentColor" strokeWidth="0.5" strokeDasharray="2,2" />
                                     <text x={-10} y={y + 4} textAnchor="end" fontSize="10" fill="currentColor">
-                                        {val.toFixed(2)}
+                                        {val.toFixed(1)}
                                     </text>
                                 </g>
                             );
@@ -86,8 +75,9 @@ export const SelfDependenceChart: React.FC<SelfDependenceChartProps> = ({ title,
                         </text>
 
                         {/* X-Axis */}
-                        {data.time.map((tick, i) => {
-                             if (data.time.length > 10 && i % Math.floor(data.time.length / 5) !== 0 && i !== data.time.length -1) return null;
+                        {timeSteps.map((tick, i) => {
+                            // Only show a subset of ticks if there are many
+                             if (timeSteps.length > 10 && i % Math.floor(timeSteps.length / 5) !== 0 && i !== timeSteps.length -1) return null;
                             const x = xScale(i);
                             return (
                                 <g key={i} className="text-gray-400">
@@ -103,20 +93,20 @@ export const SelfDependenceChart: React.FC<SelfDependenceChartProps> = ({ title,
                         </text>
 
                         {/* Lines */}
-                        <path d={getPathData(data.unconditional, xScale, yScale)} fill="none" stroke={COLORS.unconditional} strokeWidth="2" />
-                        <path d={getPathData(data.firstOrder, xScale, yScale)} fill="none" stroke={COLORS.firstOrder} strokeWidth="2" />
-                        <path d={getPathData(data.secondOrder, xScale, yScale)} fill="none" stroke={COLORS.secondOrder} strokeWidth="2" />
-                        <path d={getPathData(data.fullPast, xScale, yScale)} fill="none" stroke={COLORS.fullPast} strokeWidth="2.5" />
+                        {fromStates.map(fromState => (
+                             <path key={fromState} d={getPathData(data[fromState], xScale, yScale)} fill="none" stroke={stateColorMap.get(fromState)} strokeWidth="2" />
+                        ))}
 
                         {/* Frame */}
                         <rect x="0" y="0" width={chartWidth} height={chartHeight} fill="none" stroke="#4B5563" strokeWidth="1" />
                     </g>
                 </svg>
                 <div className="w-full md:w-48 text-sm space-y-2 pl-4">
-                    {Object.entries(LABELS).map(([key, label]) => (
-                        <div key={key} className="flex items-center">
-                            <div className="w-4 h-1 mr-2" style={{ backgroundColor: COLORS[key] }} />
-                            <span className="text-gray-300 font-mono text-xs">{label}</span>
+                    <p className="font-semibold text-gray-400 text-xs mb-2 uppercase">From State (Xt-1)</p>
+                    {fromStates.map(fromState => (
+                        <div key={fromState} className="flex items-center">
+                            <div className="w-3 h-3 rounded-full mr-2" style={{ backgroundColor: stateColorMap.get(fromState) }} />
+                            <span className="text-gray-300 font-mono text-xs">{fromState}</span>
                         </div>
                     ))}
                 </div>
