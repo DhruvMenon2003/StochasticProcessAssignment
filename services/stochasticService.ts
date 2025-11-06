@@ -1,5 +1,5 @@
-import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics, ConditionalMomentsTable } from '../types';
-import { cartesianProduct } from '../utils/mathUtils';
+import { CsvData, ProbabilityModel, Distribution, AnalysisOptions, CalculatedDistributions, ModelAnalysisResult, ConditionalDistributionTable, DependenceAnalysisPair, DependenceMetrics, ModelDependenceMetrics, ConditionalMomentsTable, StandardAnalysisResult, TimeSeriesEnsembleAnalysis, MarkovOrderResult, TimeHomogeneityResult, TimeSeriesPlotData, AnalysisResult as AnalysisResultType } from '../types';
+import { cartesianProduct, transpose } from '../utils/mathUtils';
 
 // --- Interfaces for analysis results ---
 export interface MarkovAnalysis {
@@ -12,35 +12,8 @@ export interface MarkovResult {
   [header: string]: MarkovAnalysis;
 }
 
-export interface TimeHomogeneityResult {
-    [header: string]: {
-        isHomogeneous: boolean;
-        maxDistance: number;
-    }
-}
-
-export interface MarkovOrderResult {
-    [header: string]: {
-        order: number;
-        meanDistance: number;
-        isMarkovian: boolean;
-    }[];
-}
-
-export interface AnalysisResult {
-  headers: string[];
-  isSingleVariable: boolean;
-  empirical: CalculatedDistributions;
-  modelResults?: ModelAnalysisResult[];
-  bestModelName?: string;
-  dependence?: { // Note: this is now superseded by dependenceAnalysis but kept for single MI value
-    mutualInformation: number | null;
-  };
-  markov?: MarkovResult;
-  timeHomogeneityTest?: TimeHomogeneityResult;
-  markovOrderTest?: MarkovOrderResult;
-  dependenceAnalysis?: DependenceAnalysisPair[];
-}
+// Re-export AnalysisResult type for convenience
+export type AnalysisResult = AnalysisResultType;
 
 // --- Helper Functions ---
 const getKeyFromStates = (states: (string | number)[]): string => states.join('|');
@@ -71,7 +44,6 @@ const getJointPMF = (data: CsvData): Distribution => {
     return {};
   }
   
-  // Find all unique states for each variable to define the complete state space, and sort them.
   const uniqueStatesPerVariable = data.headers.map((_, colIndex) =>
     Array.from(new Set(data.rows.map(row => row[colIndex])))
         .sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))
@@ -79,16 +51,13 @@ const getJointPMF = (data: CsvData): Distribution => {
   
   const allPossibleStateCombinations = cartesianProduct(...uniqueStatesPerVariable);
 
-  // Initialize all possible outcomes with a count of 0
   allPossibleStateCombinations.forEach(combo => {
       const key = getKeyFromStates(combo);
       jointCounts[key] = 0;
   });
 
-  // Count occurrences from the actual data
   data.rows.forEach(row => {
     const key = getKeyFromStates(row);
-    // This check ensures we only count combinations that are part of our defined state space.
     if (jointCounts.hasOwnProperty(key)) {
         jointCounts[key]++;
     }
@@ -167,7 +136,6 @@ const calculateCmf = (dist: Distribution): Distribution => {
     return cmf;
 };
 
-// --- Metric Functions ---
 const hellingerDistance = (p: Distribution, q: Distribution): number => {
     if (!p || !q) return 1;
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
@@ -181,7 +149,7 @@ const hellingerDistance = (p: Distribution, q: Distribution): number => {
 };
 
 const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => {
-    const epsilon = 1e-10; // Small value to avoid log(0)
+    const epsilon = 1e-10;
     const allKeys = new Set([...Object.keys(p), ...Object.keys(q)]);
     let divergence = 0;
 
@@ -190,7 +158,6 @@ const kullbackLeiblerDivergence = (p: Distribution, q: Distribution): number => 
         const qVal = q[key] || 0;
 
         if (pVal > 0) {
-            // Use epsilon for qVal if it's zero, to avoid infinity.
             const qValAdjusted = qVal === 0 ? epsilon : qVal;
             divergence += pVal * Math.log2(pVal / qValAdjusted);
         }
@@ -235,18 +202,14 @@ const calculatePearsonCorrelation = (
     marginal1: Distribution,
     marginal2: Distribution
 ): number | null => {
-    // Check if all states in both marginals are numeric
     const allStates1 = Object.keys(marginal1);
     const allStates2 = Object.keys(marginal2);
 
     if (allStates1.some(s => isNaN(Number(s))) || allStates2.some(s => isNaN(Number(s)))) {
-        return null; // Not applicable for non-numeric data
+        return null;
     }
 
-    let e_x = 0;
-    let e_y = 0;
-    let e_x2 = 0;
-    let e_y2 = 0;
+    let e_x = 0, e_y = 0, e_x2 = 0, e_y2 = 0;
 
     for (const state in marginal1) {
         const numState = Number(state);
@@ -268,9 +231,7 @@ const calculatePearsonCorrelation = (
     const std_dev_x = Math.sqrt(var_x);
     const std_dev_y = Math.sqrt(var_y);
 
-    if (std_dev_x < 1e-9 || std_dev_y < 1e-9) {
-        return 0; // Avoid division by zero if variance is zero
-    }
+    if (std_dev_x < 1e-9 || std_dev_y < 1e-9) return 0;
     
     let e_xy = 0;
     for (const jointKey in pairwiseJointPMF) {
@@ -282,67 +243,42 @@ const calculatePearsonCorrelation = (
     }
     
     const cov_xy = e_xy - (e_x * e_y);
-    
     const correlation = cov_xy / (std_dev_x * std_dev_y);
-
-    // Clamp the value between -1 and 1 to handle potential floating point inaccuracies
     return Math.max(-1, Math.min(1, correlation));
 };
 
-// --- Conditional Distribution ---
 const getConditionalDistributions = (jointPMF: Distribution, marginals: { [key: string]: Distribution }, headers: string[]): ConditionalDistributionTable[] => {
-    if (headers.length < 2) {
-        return [];
-    }
+    if (headers.length < 2) return [];
 
     const conditionals: ConditionalDistributionTable[] = [];
-    
-    // Get sorted states for each variable to ensure consistent ordering
     const allStates: { [key: string]: (string | number)[] } = {};
     headers.forEach(h => {
         allStates[h] = Object.keys(marginals[h]).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
     });
 
-    for (let i = 0; i < headers.length; i++) { // Target variable
-        for (let j = 0; j < headers.length; j++) { // Conditioned variable
+    for (let i = 0; i < headers.length; i++) {
+        for (let j = 0; j < headers.length; j++) {
             if (i === j) continue;
-
-            const targetVariable = headers[i];
-            const conditionedVariable = headers[j];
-
-            const targetStates = allStates[targetVariable];
-            const conditionedStates = allStates[conditionedVariable];
-
+            const targetVariable = headers[i], conditionedVariable = headers[j];
+            const targetStates = allStates[targetVariable], conditionedStates = allStates[conditionedVariable];
             const matrix: number[][] = [];
-
             for (const condState of conditionedStates) {
                 const row: number[] = [];
                 const p_conditioned = marginals[conditionedVariable][condState];
-
                 for (const targetState of targetStates) {
-                    // Calculate P(target=targetState, conditioned=condState) by summing over all other variables
                     let p_joint_pair = 0;
                     for (const fullJointKey in jointPMF) {
                         const fullStates = fullJointKey.split('|');
-                        // Use '==' for type coercion as states can be number or string
                         if (fullStates[i] == targetState && fullStates[j] == condState) {
                             p_joint_pair += jointPMF[fullJointKey];
                         }
                     }
-
                     const conditionalProb = (p_conditioned > 1e-9) ? p_joint_pair / p_conditioned : 0;
                     row.push(conditionalProb);
                 }
                 matrix.push(row);
             }
-
-            conditionals.push({
-                targetVariable,
-                conditionedVariable,
-                targetStates,
-                conditionedStates,
-                matrix
-            });
+            conditionals.push({ targetVariable, conditionedVariable, targetStates, conditionedStates, matrix });
         }
     }
     return conditionals;
@@ -350,182 +286,99 @@ const getConditionalDistributions = (jointPMF: Distribution, marginals: { [key: 
 
 const getConditionalMoments = (conditionalProbs: ConditionalDistributionTable[]): ConditionalMomentsTable[] => {
     const conditionalMoments: ConditionalMomentsTable[] = [];
-
     for (const condProbTable of conditionalProbs) {
-        const {
-            targetVariable,
-            conditionedVariable,
-            targetStates,
-            conditionedStates,
-            matrix, // matrix[i][j] = P(target=targetStates[j] | conditioned=conditionedStates[i])
-        } = condProbTable;
-
-        // Check if target states are numeric. If not, we can't calculate moments.
+        const { targetVariable, conditionedVariable, targetStates, conditionedStates, matrix } = condProbTable;
         const numericTargetStates = targetStates.map(Number);
-        if (numericTargetStates.some(isNaN)) {
-            continue;
-        }
-
-        const expectations: number[] = [];
-        const variances: number[] = [];
-
-        // Iterate over each state of the conditioned variable (each row of the matrix)
+        if (numericTargetStates.some(isNaN)) continue;
+        const expectations: number[] = [], variances: number[] = [];
         for (let i = 0; i < conditionedStates.length; i++) {
-            const conditionalDistribution = matrix[i]; // This is P(target | conditioned = conditionedStates[i])
-
-            // Calculate E(X | Y=y_i)
+            const conditionalDistribution = matrix[i];
             let expectation = 0;
-            for (let j = 0; j < numericTargetStates.length; j++) {
-                expectation += numericTargetStates[j] * conditionalDistribution[j];
-            }
-
-            // Calculate E(X^2 | Y=y_i)
+            for (let j = 0; j < numericTargetStates.length; j++) expectation += numericTargetStates[j] * conditionalDistribution[j];
             let expectationSq = 0;
-            for (let j = 0; j < numericTargetStates.length; j++) {
-                expectationSq += (numericTargetStates[j] ** 2) * conditionalDistribution[j];
-            }
-
-            // Calculate Var(X | Y=y_i)
+            for (let j = 0; j < numericTargetStates.length; j++) expectationSq += (numericTargetStates[j] ** 2) * conditionalDistribution[j];
             const variance = expectationSq - (expectation ** 2);
-
             expectations.push(expectation);
             variances.push(variance);
         }
-
-        conditionalMoments.push({
-            targetVariable,
-            conditionedVariable,
-            conditionedStates,
-            expectations,
-            variances,
-        });
+        conditionalMoments.push({ targetVariable, conditionedVariable, conditionedStates, expectations, variances });
     }
-
     return conditionalMoments;
 };
 
-// --- Markov Analysis Functions ---
 const getTransitionMatrix = (series: (string | number)[]): { states: (string | number)[], matrix: number[][] } => {
     const states = Array.from(new Set(series)).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
     const stateIndex = new Map(states.map((s, i) => [s, i]));
     const n = states.length;
     const counts = Array(n).fill(0).map(() => Array(n).fill(0));
-
     for (let i = 0; i < series.length - 1; i++) {
         const from = stateIndex.get(series[i]);
         const to = stateIndex.get(series[i+1]);
-        if (from !== undefined && to !== undefined) {
-          counts[from][to]++;
-        }
+        if (from !== undefined && to !== undefined) counts[from][to]++;
     }
-
     const matrix = counts.map(row => {
         const total = row.reduce((a, b) => a + b, 0);
         return total > 0 ? row.map(count => count / total) : row;
     });
-    
     return { states, matrix };
 };
 
 const getStationaryDistribution = (transitionMatrix: number[][], states: (string | number)[]): Distribution => {
     const n = transitionMatrix.length;
     if (n === 0) return {};
-    
-    let p = Array(n).fill(1 / n); // Start with uniform distribution
-    
+    let p = Array(n).fill(1 / n);
     for (let iter = 0; iter < 1000; iter++) {
         const pNext = Array(n).fill(0);
-        for (let j = 0; j < n; j++) {
-            for (let i = 0; i < n; i++) {
-                pNext[j] += p[i] * transitionMatrix[i][j];
-            }
-        }
-        
+        for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pNext[j] += p[i] * transitionMatrix[i][j];
         let diff = 0;
-        for (let i = 0; i < n; i++) {
-            diff += Math.abs(pNext[i] - p[i]);
-        }
+        for (let i = 0; i < n; i++) diff += Math.abs(pNext[i] - p[i]);
         if (diff < 1e-9) break;
-
         p = pNext;
     }
-    
     const dist: Distribution = {};
-    states.forEach((state, i) => {
-        dist[String(state)] = p[i];
-    });
-
+    states.forEach((state, i) => { dist[String(state)] = p[i]; });
     return dist;
 };
 
-// --- New Advanced Analysis Functions ---
-const testTimeHomogeneity = (series: (string | number)[], numSegments: number = 2): { isHomogeneous: boolean; maxDistance: number } => {
+const testTimeHomogeneity = (series: (string | number)[], numSegments: number = 2): TimeHomogeneityResult[string] => {
     const segmentLength = Math.floor(series.length / numSegments);
-    if (segmentLength < 20) return { isHomogeneous: true, maxDistance: 0 }; // Not enough data
-
+    if (segmentLength < 20) return { isHomogeneous: true, maxDistance: 0 };
     const matrices = [];
     for (let i = 0; i < numSegments; i++) {
         const segment = series.slice(i * segmentLength, (i + 1) * segmentLength);
         matrices.push(getTransitionMatrix(segment).matrix);
     }
-    
     let maxDist = 0;
     for (let i = 0; i < numSegments; i++) {
         for (let j = i + 1; j < numSegments; j++) {
-            const m1 = matrices[i].flat();
-            const m2 = matrices[j].flat();
+            const m1 = matrices[i].flat(), m2 = matrices[j].flat();
             if(m1.length !== m2.length) continue;
-
-            const dist = hellingerDistance(
-                Object.fromEntries(m1.map((p, k) => [k, p])),
-                Object.fromEntries(m2.map((p, k) => [k, p]))
-            );
+            const dist = hellingerDistance(Object.fromEntries(m1.map((p, k) => [k, p])), Object.fromEntries(m2.map((p, k) => [k, p])));
             if (dist > maxDist) maxDist = dist;
         }
     }
-
-    return {
-        isHomogeneous: maxDist < 0.1, // Threshold from MATLAB example
-        maxDistance: maxDist
-    };
+    return { isHomogeneous: maxDist < 0.1, maxDistance: maxDist };
 };
 
-const analyzeMarkovOrder = (series: (string | number)[], maxOrder: number = 1): MarkovOrderResult[string] => {
-    const results = [];
+const analyzeMarkovOrder = (series: (string | number)[]): MarkovOrderResult[string] => {
     if (series.length < 20) return [];
-
-    // Order 1 test
     const { matrix: tMatrix, states } = getTransitionMatrix(series);
     const stationaryDist = getStationaryDistribution(tMatrix, states);
-
     let totalDist = 0;
     for(let i = 0; i < tMatrix.length; i++) {
         const rowDist = Object.fromEntries(tMatrix[i].map((p, k) => [states[k], p]));
         totalDist += hellingerDistance(rowDist, stationaryDist);
     }
-
     const meanDist = tMatrix.length > 0 ? totalDist / tMatrix.length : 0;
-    
-    results.push({
-        order: 1,
-        meanDistance: meanDist,
-        isMarkovian: meanDist > 0.1, // If dist is high, it's NOT independent, so it IS Markovian
-    });
-
-    // Higher orders are complex, so we'll stick to a simplified 1st order test.
-    return results;
+    return [{ order: 1, meanDistance: meanDist, isMarkovian: meanDist > 0.1 }];
 };
 
-// --- Stochastic Dependence Analysis ---
 const createDistanceMatrix = (series: number[]): number[][] => {
     const n = series.length;
     const matrix: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
-    for (let i = 0; i < n; i++) {
-        for (let j = i; j < n; j++) {
-            const dist = Math.abs(series[i] - series[j]);
-            matrix[i][j] = dist;
-            matrix[j][i] = dist;
-        }
+    for (let i = 0; i < n; i++) for (let j = i; j < n; j++) {
+        const dist = Math.abs(series[i] - series[j]);
+        matrix[i][j] = dist; matrix[j][i] = dist;
     }
     return matrix;
 };
@@ -536,54 +389,29 @@ const doubleCenterMatrix = (matrix: number[][]): number[][] => {
     const rowMeans = matrix.map(row => row.reduce((a, b) => a + b, 0) / n);
     const colMeans = Array(n).fill(0).map((_, j) => matrix.reduce((sum, row) => sum + row[j], 0) / n);
     const totalMean = rowMeans.reduce((a, b) => a + b, 0) / n;
-
     const centered: number[][] = Array(n).fill(0).map(() => Array(n).fill(0));
-    for (let i = 0; i < n; i++) {
-        for (let j = 0; j < n; j++) {
-            centered[i][j] = matrix[i][j] - rowMeans[i] - colMeans[j] + totalMean;
-        }
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        centered[i][j] = matrix[i][j] - rowMeans[i] - colMeans[j] + totalMean;
     }
     return centered;
 };
 
 const calculateDistanceCorrelation = (seriesX: (string | number)[], seriesY: (string | number)[]): number | null => {
-    const numericX = seriesX.map(Number);
-    const numericY = seriesY.map(Number);
-    if (numericX.some(isNaN) || numericY.some(isNaN)) {
-        return null;
-    }
-
+    const numericX = seriesX.map(Number), numericY = seriesY.map(Number);
+    if (numericX.some(isNaN) || numericY.some(isNaN)) return null;
     const n = numericX.length;
     if (n === 0) return null;
-
-    const distMatrixX = createDistanceMatrix(numericX);
-    const distMatrixY = createDistanceMatrix(numericY);
-
-    const centeredX = doubleCenterMatrix(distMatrixX);
-    const centeredY = doubleCenterMatrix(distMatrixY);
-
-    let dCovSq = 0;
-    let dVarXSq = 0;
-    let dVarYSq = 0;
-
-    for (let i = 0; i < n; i++) {
-        for (let j = 0; j < n; j++) {
-            dCovSq += centeredX[i][j] * centeredY[i][j];
-            dVarXSq += centeredX[i][j] * centeredX[i][j];
-            dVarYSq += centeredY[i][j] * centeredY[i][j];
-        }
+    const distMatrixX = createDistanceMatrix(numericX), distMatrixY = createDistanceMatrix(numericY);
+    const centeredX = doubleCenterMatrix(distMatrixX), centeredY = doubleCenterMatrix(distMatrixY);
+    let dCovSq = 0, dVarXSq = 0, dVarYSq = 0;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        dCovSq += centeredX[i][j] * centeredY[i][j];
+        dVarXSq += centeredX[i][j] * centeredX[i][j];
+        dVarYSq += centeredY[i][j] * centeredY[i][j];
     }
-    
-    dCovSq /= (n * n);
-    dVarXSq /= (n * n);
-    dVarYSq /= (n * n);
-
-    if (dVarXSq <= 1e-9 || dVarYSq <= 1e-9) {
-        return 0;
-    }
-
-    const dCor = Math.sqrt(Math.max(0, dCovSq)) / Math.sqrt(Math.sqrt(dVarXSq) * Math.sqrt(dVarYSq));
-    return dCor;
+    dCovSq /= (n * n); dVarXSq /= (n * n); dVarYSq /= (n * n);
+    if (dVarXSq <= 1e-9 || dVarYSq <= 1e-9) return 0;
+    return Math.sqrt(Math.max(0, dCovSq)) / Math.sqrt(Math.sqrt(dVarXSq) * Math.sqrt(dVarYSq));
 };
 
 const getDecimalPlaces = (num: number): number => {
@@ -593,26 +421,12 @@ const getDecimalPlaces = (num: number): number => {
     return decimalPart ? decimalPart.length : 0;
 };
 
-/**
- * Generates a dataset that deterministically represents the exact proportions of a given model PMF.
- * The size of the dataset is determined by the precision of the probabilities.
- * e.g., probabilities with 2 decimal places (0.25) will result in a dataset of 100 points.
- * @param jointPMF The model's joint probability mass function.
- * @param headers The headers for the variables.
- * @returns A CsvData object representing the model.
- */
 const generateDataFromProportions = (jointPMF: Distribution, headers: string[]): CsvData => {
     const probabilities = Object.values(jointPMF).filter(p => p > 0);
-    if (probabilities.length === 0) {
-        return { headers, rows: [] };
-    }
-
-    // Find the maximum number of decimal places to determine the scale factor 'n'
+    if (probabilities.length === 0) return { headers, rows: [] };
     const maxDecimalPlaces = Math.max(...probabilities.map(p => getDecimalPlaces(p)));
     const n = Math.pow(10, maxDecimalPlaces);
-
     const generatedRows: (string | number)[][] = [];
-
     for (const outcomeKey in jointPMF) {
         const probability = jointPMF[outcomeKey];
         if (probability > 0) {
@@ -621,21 +435,171 @@ const generateDataFromProportions = (jointPMF: Distribution, headers: string[]):
                 const trimmedCell = cell.trim();
                 return isNaN(Number(trimmedCell)) || trimmedCell === '' ? trimmedCell : Number(trimmedCell);
             });
-
-            for (let i = 0; i < numRows; i++) {
-                generatedRows.push([...row]);
-            }
+            for (let i = 0; i < numRows; i++) generatedRows.push([...row]);
         }
     }
-    
-    // Shuffling is good practice, though dCor is order-insensitive.
     for (let i = generatedRows.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [generatedRows[i], generatedRows[j]] = [generatedRows[j], generatedRows[i]];
     }
-
     return { headers, rows: generatedRows };
 };
+
+
+// --- New Time-Series Ensemble Functions ---
+
+export function isTimeSeriesEnsemble(headers: string[]): boolean {
+  if (headers.length < 2) return false;
+  const firstHeader = headers[0]?.trim().toLowerCase();
+  if (firstHeader !== 'time') return false;
+  for (let i = 1; i < headers.length; i++) {
+    const header = headers[i]?.trim().toLowerCase();
+    if (!header.startsWith('instance')) return false;
+  }
+  return true;
+}
+
+function analyzeTimeSeriesEnsemble(data: CsvData, options: AnalysisOptions): TimeSeriesEnsembleAnalysis {
+    const timeSteps = data.rows.map(r => r[0]);
+    const instanceData = data.rows.map(row => row.slice(1));
+    const ensemble = transpose(instanceData);
+    const numInstances = ensemble.length;
+    const numTimes = timeSteps.length;
+    
+    const allStates = Array.from(new Set(ensemble.flat())).sort((a,b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+
+    const plotData: { [state: string]: TimeSeriesPlotData } = {};
+    allStates.forEach(s => {
+        plotData[String(s)] = {
+            time: timeSteps,
+            unconditional: Array(numTimes).fill(null),
+            firstOrder: Array(numTimes).fill(null),
+            secondOrder: Array(numTimes).fill(null),
+            fullPast: Array(numTimes).fill(null),
+        };
+    });
+
+    // P(Xt)
+    for (let t = 0; t < numTimes; t++) {
+        const counts = allStates.reduce((acc, s) => ({ ...acc, [String(s)]: 0 }), {});
+        for (let i = 0; i < numInstances; i++) {
+            counts[String(ensemble[i][t])]++;
+        }
+        allStates.forEach(s => {
+            plotData[String(s)].unconditional[t] = counts[String(s)] / numInstances;
+        });
+    }
+
+    // P(Xt | X_t-1)
+    const t1Counts = {};
+    for (const s1 of allStates) {
+        t1Counts[String(s1)] = allStates.reduce((acc, s2) => ({ ...acc, [String(s2)]: 0 }), { total: 0 });
+    }
+    for (let i = 0; i < numInstances; i++) {
+        for (let t = 1; t < numTimes; t++) {
+            const prev = String(ensemble[i][t-1]), curr = String(ensemble[i][t]);
+            t1Counts[prev][curr]++;
+            t1Counts[prev].total++;
+        }
+    }
+    const t1Probs = {};
+    for (const s1 in t1Counts) {
+        t1Probs[s1] = {};
+        for (const s2 in t1Counts[s1]) {
+            if (s2 !== 'total') t1Probs[s1][s2] = t1Counts[s1].total > 0 ? t1Counts[s1][s2] / t1Counts[s1].total : 0;
+        }
+    }
+    for (let t = 1; t < numTimes; t++) {
+        const avgPreds = allStates.reduce((acc, s) => ({ ...acc, [String(s)]: 0 }), {});
+        for (let i = 0; i < numInstances; i++) {
+            const prev = String(ensemble[i][t-1]);
+            for (const s of allStates) {
+                avgPreds[String(s)] += t1Probs[prev]?.[String(s)] || 0;
+            }
+        }
+        allStates.forEach(s => plotData[String(s)].firstOrder[t] = avgPreds[String(s)] / numInstances);
+    }
+
+    // P(Xt | X_t-1, X_t-2)
+    const t2Counts = {};
+     for (const s1 of allStates) {
+        t2Counts[String(s1)] = {};
+        for (const s2 of allStates) {
+            t2Counts[String(s1)][String(s2)] = allStates.reduce((acc, s3) => ({ ...acc, [String(s3)]: 0 }), { total: 0 });
+        }
+    }
+    for (let i = 0; i < numInstances; i++) {
+        for (let t = 2; t < numTimes; t++) {
+            const p2 = String(ensemble[i][t-2]), p1 = String(ensemble[i][t-1]), curr = String(ensemble[i][t]);
+            t2Counts[p2][p1][curr]++;
+            t2Counts[p2][p1].total++;
+        }
+    }
+    const t2Probs = {};
+    for (const s2 in t2Counts) for (const s1 in t2Counts[s2]) {
+        if (!t2Probs[s2]) t2Probs[s2] = {};
+        t2Probs[s2][s1] = {};
+        for (const s3 in t2Counts[s2][s1]) {
+            if (s3 !== 'total') t2Probs[s2][s1][s3] = t2Counts[s2][s1].total > 0 ? t2Counts[s2][s1][s3] / t2Counts[s2][s1].total : 0;
+        }
+    }
+    for (let t = 2; t < numTimes; t++) {
+        const avgPreds = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
+        for (let i = 0; i < numInstances; i++) {
+            const p2 = String(ensemble[i][t-2]), p1 = String(ensemble[i][t-1]);
+            for (const s of allStates) {
+                avgPreds[String(s)] += t2Probs[p2]?.[p1]?.[String(s)] || 0;
+            }
+        }
+        allStates.forEach(s => plotData[String(s)].secondOrder[t] = avgPreds[String(s)] / numInstances);
+    }
+    
+    // P(Xt | X_1, ..., X_t-1)
+    for (let t = 1; t < numTimes; t++) {
+        const avgPreds = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
+        const historyGroups = new Map();
+        for (let i = 0; i < numInstances; i++) {
+            const historyKey = ensemble[i].slice(0, t).join('|');
+            if (!historyGroups.has(historyKey)) historyGroups.set(historyKey, []);
+            historyGroups.get(historyKey).push(i);
+        }
+        for (let i = 0; i < numInstances; i++) {
+            const historyKey = ensemble[i].slice(0, t).join('|');
+            const group = historyGroups.get(historyKey);
+            const counts = allStates.reduce((acc, s) => ({...acc, [String(s)]: 0}), {});
+            if (group) {
+                for (const memberIndex of group) {
+                    if (t < numTimes) counts[String(ensemble[memberIndex][t])]++;
+                }
+                for (const s of allStates) {
+                     avgPreds[String(s)] += group.length > 0 ? counts[String(s)] / group.length : 0;
+                }
+            }
+        }
+        allStates.forEach(s => plotData[String(s)].fullPast[t] = avgPreds[String(s)] / numInstances);
+    }
+    
+    let timeHomogeneityTest: TimeHomogeneityResult, markovOrderTest: MarkovOrderResult;
+    const representativeSeries = ensemble[0];
+    if (representativeSeries) {
+        if (options.runTimeHomogeneityTest) {
+            timeHomogeneityTest = { 'Instance1': testTimeHomogeneity(representativeSeries) };
+        }
+        if (options.runMarkovOrderTest) {
+            markovOrderTest = { 'Instance1': analyzeMarkovOrder(representativeSeries) };
+        }
+    }
+
+    return {
+      isTimeSeriesEnsemble: true,
+      headers: ['Time', 'Instances'],
+      timeSteps,
+      states: allStates,
+      plotData,
+      timeHomogeneityTest,
+      markovOrderTest,
+    };
+}
 
 
 // --- Main Analysis Function ---
@@ -645,6 +609,10 @@ export function analyzeData(
     options: AnalysisOptions
 ): AnalysisResult {
   if (data.rows.length === 0) throw new Error("Dataset has no rows to analyze.");
+  
+  if (isTimeSeriesEnsemble(data.headers)) {
+      return analyzeTimeSeriesEnsemble(data, options);
+  }
 
   const isSingleVariable = data.headers.length === 1;
   const empiricalJoint = getJointPMF(data);
@@ -668,18 +636,16 @@ export function analyzeData(
       }
   }
 
-  let result: AnalysisResult = { 
+  let result: StandardAnalysisResult = { 
     headers: data.headers, 
     isSingleVariable,
     empirical: empiricalDists 
   };
   
-  // --- Stochastic Dependence analysis ---
   const dependenceAnalyses: DependenceAnalysisPair[] = [];
   if (data.headers.length >= 2) {
       const headerPairs = getCombinations(data.headers, 2) as [string, string][];
 
-      // Populate legacy dependence object with first pair's MI
       const firstPair = headerPairs[0];
       const firstPairPMF = getPairwiseJointPMF(empiricalJoint, data.headers, firstPair);
       result.dependence = {
@@ -691,7 +657,6 @@ export function analyzeData(
           const h1Index = data.headers.indexOf(h1);
           const h2Index = data.headers.indexOf(h2);
 
-          // --- Empirical Calculation ---
           const pairwiseEmpiricalJoint = getPairwiseJointPMF(empiricalJoint, data.headers, pair);
           const empiricalMI = calculatePairwiseMutualInformation(pairwiseEmpiricalJoint, empiricalMarginals[h1], empiricalMarginals[h2]);
           const seriesX = data.rows.map(r => r[h1Index]);
@@ -699,13 +664,8 @@ export function analyzeData(
           const empiricalDC = calculateDistanceCorrelation(seriesX, seriesY);
           const empiricalPearson = calculatePearsonCorrelation(pairwiseEmpiricalJoint, empiricalMarginals[h1], empiricalMarginals[h2]);
           
-          const empiricalMetrics: DependenceMetrics = {
-              mutualInformation: empiricalMI,
-              distanceCorrelation: empiricalDC,
-              pearsonCorrelation: empiricalPearson,
-          };
+          const empiricalMetrics: DependenceMetrics = { mutualInformation: empiricalMI, distanceCorrelation: empiricalDC, pearsonCorrelation: empiricalPearson };
 
-          // --- Model Calculations ---
           const modelMetrics: ModelDependenceMetrics[] = models.map(({ name, model }) => {
               const modelJoint = getModelJointPMF(model, data.headers);
               const modelMarginals = getMarginals(modelJoint, data.headers);
@@ -718,40 +678,23 @@ export function analyzeData(
               const modelDC = calculateDistanceCorrelation(simSeriesX, simSeriesY);
               const modelPearson = calculatePearsonCorrelation(pairwiseModelJoint, modelMarginals[h1], modelMarginals[h2]);
 
-              return {
-                  modelName: name,
-                  mutualInformation: modelMI,
-                  distanceCorrelation: modelDC,
-                  pearsonCorrelation: modelPearson,
-              };
+              return { modelName: name, mutualInformation: modelMI, distanceCorrelation: modelDC, pearsonCorrelation: modelPearson };
           });
-
-          dependenceAnalyses.push({
-              variablePair: pair,
-              empiricalMetrics,
-              modelMetrics,
-          });
+          dependenceAnalyses.push({ variablePair: pair, empiricalMetrics, modelMetrics });
       }
   }
   result.dependenceAnalysis = dependenceAnalyses;
 
-  
-  // Advanced analysis if requested
   if (options.runTimeHomogeneityTest) {
       const thResults: TimeHomogeneityResult = {};
-      data.headers.forEach((h, i) => {
-          thResults[h] = testTimeHomogeneity(data.rows.map(r => r[i]));
-      });
+      data.headers.forEach((h, i) => { thResults[h] = testTimeHomogeneity(data.rows.map(r => r[i])); });
       result.timeHomogeneityTest = thResults;
   }
    if (options.runMarkovOrderTest) {
       const moResults: MarkovOrderResult = {};
-      data.headers.forEach((h, i) => {
-          moResults[h] = analyzeMarkovOrder(data.rows.map(r => r[i]));
-      });
+      data.headers.forEach((h, i) => { moResults[h] = analyzeMarkovOrder(data.rows.map(r => r[i])); });
       result.markovOrderTest = moResults;
       
-      // Perform Markov Chain analysis ONLY if this option is on
       if (data.rows.length > 1) {
         const markovResult: MarkovResult = {};
         data.headers.forEach((header, index) => {
@@ -767,116 +710,99 @@ export function analyzeData(
   }
 
   if (models.length > 0) {
-    const modelResults: ModelAnalysisResult[] = models.map(({name, model}) => {
+    const rawModelResults = models.map(({name, model}) => {
         const modelJoint = getModelJointPMF(model, data.headers);
         const modelMarginals = getMarginals(modelJoint, data.headers);
         const modelDists: CalculatedDistributions = { joint: modelJoint, marginals: modelMarginals };
         
         const modelMoments: { [key: string]: { mean: number; variance: number } } = {};
         data.headers.forEach(header => {
-            if (modelMarginals[header]) {
-                modelMoments[header] = calculateMoments(modelMarginals[header]);
-            }
+            if (modelMarginals[header]) modelMoments[header] = calculateMoments(modelMarginals[header]);
         });
         modelDists.moments = modelMoments;
         
-        if (!isSingleVariable) {
+        if (isSingleVariable) {
+            modelDists.cmf = calculateCmf(modelDists.marginals[data.headers[0]]);
+        } else {
             modelDists.conditionals = getConditionalDistributions(modelJoint, modelMarginals, data.headers);
-            if (modelDists.conditionals) {
-                modelDists.conditionalMoments = getConditionalMoments(modelDists.conditionals);
-            }
+            if (modelDists.conditionals) modelDists.conditionalMoments = getConditionalMoments(modelDists.conditionals);
         }
+        
+        const meanSquaredErrors: { [key: string]: number } = {};
+        data.headers.forEach(header => {
+            const empMoments = empiricalDists.moments?.[header];
+            const modMoments = modelDists.moments?.[header];
+            if (empMoments && !isNaN(empMoments.mean) && modMoments && !isNaN(modMoments.mean)) {
+                meanSquaredErrors[header] = ((modMoments.mean - empMoments.mean) ** 2) + modMoments.variance;
+            } else {
+                meanSquaredErrors[header] = NaN;
+            }
+        });
 
         const empiricalMetricDist = isSingleVariable ? empiricalDists.marginals[data.headers[0]] : empiricalJoint;
         const modelMetricDist = isSingleVariable ? modelDists.marginals[data.headers[0]] : modelJoint;
-        
-        let mse;
-        if (isSingleVariable) {
-            const singleVarHeader = data.headers[0];
-            const empMoments = empiricalDists.moments?.[singleVarHeader];
-            const modMoments = modelDists.moments?.[singleVarHeader];
-            modelDists.cmf = calculateCmf(modelDists.marginals[singleVarHeader]);
-
-            if (empMoments && !isNaN(empMoments.mean) && modMoments && !isNaN(modMoments.mean)) {
-                const bias = modMoments.mean - empMoments.mean;
-                mse = (bias ** 2) + modMoments.variance;
-            } else {
-                mse = NaN;
-            }
-        } else {
-            let totalMse = 0;
-            let numericVarsCount = 0;
-            data.headers.forEach(header => {
-                const empMoments = empiricalDists.moments?.[header];
-                const modMoments = modelDists.moments?.[header];
-                if (empMoments && !isNaN(empMoments.mean) && modMoments && !isNaN(modMoments.mean)) {
-                    const bias = modMoments.mean - empMoments.mean;
-                    const marginalMse = (bias ** 2) + modMoments.variance;
-                    totalMse += marginalMse;
-                    numericVarsCount++;
-                }
-            });
-            mse = numericVarsCount > 0 ? totalMse / numericVarsCount : NaN;
-        }
 
         return {
             name,
             distributions: modelDists,
             comparison: {
                 hellingerDistance: hellingerDistance(empiricalMetricDist, modelMetricDist),
-                meanSquaredError: mse,
+                meanSquaredErrors: meanSquaredErrors,
                 kullbackLeiblerDivergence: kullbackLeiblerDivergence(empiricalMetricDist, modelMetricDist),
             }
         };
     });
     
-    // Perform comparison and find best model
-    if (isSingleVariable && modelResults.length > 1) {
-        const metrics: (keyof ModelAnalysisResult['comparison'])[] = ['hellingerDistance', 'meanSquaredError', 'kullbackLeiblerDivergence'];
-        const winners: { [metric: string]: { name: string, value: number } } = {};
+    const metrics: string[] = ['Hellinger Distance', 'KL Divergence'];
+    data.headers.forEach(h => {
+        if (!isNaN(rawModelResults[0]?.comparison.meanSquaredErrors[h])) metrics.push(`MSE (${h})`);
+    });
 
-        metrics.forEach(metric => {
-            let bestModel: ModelAnalysisResult | null = null;
-            let bestValue = Infinity;
-            modelResults.forEach(res => {
-                const value = res.comparison[metric];
-                if (isFinite(value) && value < bestValue) {
-                    bestValue = value;
-                    bestModel = res;
-                }
-            });
-            if (bestModel) {
-                winners[metric] = { name: bestModel.name, value: bestValue };
+    const winners: { [metric: string]: { name: string, value: number } } = {};
+    metrics.forEach(metric => {
+        let bestModelName: string | null = null;
+        let bestValue = Infinity;
+        rawModelResults.forEach(res => {
+            let value: number;
+            if (metric.startsWith('MSE')) {
+                const header = metric.match(/\(([^)]+)\)/)?.[1];
+                value = header ? res.comparison.meanSquaredErrors[header] : NaN;
+            } else if (metric === 'Hellinger Distance') {
+                value = res.comparison.hellingerDistance;
+            } else {
+                value = res.comparison.kullbackLeiblerDivergence;
+            }
+            if (isFinite(value) && value < bestValue) {
+                bestValue = value; bestModelName = res.name;
             }
         });
-        
-        modelResults.forEach(res => {
-            res.comparisonMetrics = {};
-            res.wins = 0;
-            metrics.forEach(metric => {
-                const value = res.comparison[metric];
-                const isWinner = winners[metric]?.name === res.name && winners[metric]?.value === value;
-                if (isWinner) res.wins!++;
-                res.comparisonMetrics![metric] = { value, isWinner };
-            });
-        });
-        
-        result.bestModelName = modelResults.reduce((best, current) => (current.wins ?? 0) > (best.wins ?? 0) ? current : best).name;
+        if (bestModelName) winners[metric] = { name: bestModelName, value: bestValue };
+    });
 
-    } else if (!isSingleVariable && modelResults.length > 0) {
-        // Multi-variable composite score logic
-        modelResults.forEach(res => {
-            const { hellingerDistance: hd, meanSquaredError: mse, kullbackLeiblerDivergence: kl } = res.comparison;
-            const validMse = isFinite(mse) ? mse : 0;
-            const validKl = isFinite(kl) ? kl / 10 : 1;
-            res.comparison.score = hd + validMse + validKl;
+    const finalModelResults: ModelAnalysisResult[] = rawModelResults.map(res => {
+        const comparisonMetrics: ModelAnalysisResult['comparisonMetrics'] = {};
+        let wins = 0;
+        metrics.forEach(metric => {
+            let value: number;
+            if (metric.startsWith('MSE')) {
+                const header = metric.match(/\(([^)]+)\)/)?.[1];
+                value = header ? res.comparison.meanSquaredErrors[header] : NaN;
+            } else if (metric === 'Hellinger Distance') {
+                value = res.comparison.hellingerDistance;
+            } else {
+                value = res.comparison.kullbackLeiblerDivergence;
+            }
+            const isWinner = winners[metric]?.name === res.name && winners[metric]?.value === value;
+            if (isWinner) wins++;
+            comparisonMetrics[metric] = { value, isWinner };
         });
-        result.bestModelName = modelResults.reduce((best, current) => (current.comparison.score ?? Infinity) < (best.comparison.score ?? Infinity) ? current : best).name;
-    } else if (modelResults.length > 0) {
-        result.bestModelName = modelResults[0].name;
+        return { ...res, comparisonMetrics, wins };
+    });
+
+    if (finalModelResults.length > 0) {
+        result.bestModelName = finalModelResults.reduce((best, current) => (current.wins > best.wins) ? current : best).name;
     }
-
-    result.modelResults = modelResults;
+    result.modelResults = finalModelResults;
   }
 
   return result;

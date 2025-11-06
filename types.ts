@@ -69,19 +69,18 @@ export interface ModelAnalysisResult {
     distributions: CalculatedDistributions;
     comparison: {
         hellingerDistance: number;
-        meanSquaredError: number;
+        meanSquaredErrors: { [key: string]: number }; // Key is variable name
         kullbackLeiblerDivergence: number;
-        score?: number; // Optional for multi-variable
     };
-    // For single variable comparison
-    comparisonMetrics?: {
-        [metricName: string]: {
+    comparisonMetrics: {
+        [metricName: string]: { // e.g., 'Hellinger Distance', 'KL Divergence', 'MSE (VarX)'
             value: number;
             isWinner: boolean;
         };
     };
-    wins?: number;
+    wins: number;
 }
+
 
 export interface DependenceMetrics {
     mutualInformation: number | null;
@@ -98,3 +97,58 @@ export interface DependenceAnalysisPair {
     empiricalMetrics: DependenceMetrics;
     modelMetrics: ModelDependenceMetrics[];
 }
+
+// --- New Types for Time-Series Ensemble Analysis ---
+
+export interface TimeSeriesPlotData {
+  time: (string|number)[];
+  unconditional: (number | null)[];
+  firstOrder: (number | null)[];
+  secondOrder: (number | null)[];
+  fullPast: (number | null)[];
+}
+
+export interface TimeHomogeneityResult {
+    [header: string]: {
+        isHomogeneous: boolean;
+        maxDistance: number;
+    }
+}
+
+export interface MarkovOrderResult {
+    [header: string]: {
+        order: number;
+        meanDistance: number;
+        isMarkovian: boolean;
+    }[];
+}
+
+export interface TimeSeriesEnsembleAnalysis {
+  isTimeSeriesEnsemble: true;
+  headers: string[]; // ['Time', 'Instances']
+  timeSteps: (string|number)[];
+  states: (string|number)[];
+  plotData: {
+    [state: string]: TimeSeriesPlotData;
+  };
+  timeHomogeneityTest?: TimeHomogeneityResult;
+  markovOrderTest?: MarkovOrderResult;
+}
+
+export interface StandardAnalysisResult {
+  isTimeSeriesEnsemble?: false;
+  headers: string[];
+  isSingleVariable: boolean;
+  empirical: CalculatedDistributions;
+  modelResults?: ModelAnalysisResult[];
+  bestModelName?: string;
+  dependence?: {
+    mutualInformation: number | null;
+  };
+  markov?: any; // Using `any` to avoid circular dependency with stochasticService types
+  timeHomogeneityTest?: TimeHomogeneityResult;
+  markovOrderTest?: MarkovOrderResult;
+  dependenceAnalysis?: DependenceAnalysisPair[];
+}
+
+export type AnalysisResult = StandardAnalysisResult | TimeSeriesEnsembleAnalysis;

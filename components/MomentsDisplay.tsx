@@ -10,7 +10,8 @@ export const MomentsDisplay: React.FC<MomentsDisplayProps> = ({ title, moments }
     return null;
   }
   
-  const validMoments = Object.entries(moments).filter(([_, m]) => !isNaN(m.mean));
+  // FIX: Cast `m` to access `mean` property, as it's inferred as `unknown`.
+  const validMoments = Object.entries(moments).filter(([_, m]) => !isNaN((m as { mean: number }).mean));
 
   if (validMoments.length === 0) {
     return null; // Don't render if no numeric variables have moments
@@ -29,7 +30,8 @@ export const MomentsDisplay: React.FC<MomentsDisplayProps> = ({ title, moments }
             </tr>
           </thead>
           <tbody>
-            {validMoments.map(([variable, { mean, variance }]) => (
+            {/* FIX: Cast `validMoments` to the correct type to allow destructuring, as the value from Object.entries is inferred as `{}`. */}
+            {(validMoments as [string, { mean: number; variance: number }][]).map(([variable, { mean, variance }]) => (
               <tr key={variable} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50">
                 <th className="p-3 font-semibold bg-gray-800 sticky left-0">{variable}</th>
                 <td className="p-3 text-center">

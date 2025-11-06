@@ -3,7 +3,7 @@ import { DataInput } from './components/DataInput';
 import { ResultsDisplay } from './components/ResultsDisplay';
 import { CalculatorIcon } from './components/icons/CalculatorIcon';
 import { parseCsvData } from './utils/csvParser';
-import { analyzeData, AnalysisResult } from './services/stochasticService';
+import { analyzeData, AnalysisResult, isTimeSeriesEnsemble } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
 import { CsvData, ModelDef, VariableDef, AnalysisOptions } from './types';
 import { ModelsManager } from './components/ModelsManager';
@@ -51,13 +51,34 @@ export default function App() {
   const statusTimeoutRef = useRef<number | null>(null);
   const isInitialMount = useRef(true);
 
+  const [isTimeSeriesMode, setIsTimeSeriesMode] = useState(false);
+
+  // Effect to detect data format and set analysis mode
+  useEffect(() => {
+    try {
+      const data = parseCsvData(csvString);
+      const isTs = isTimeSeriesEnsemble(data.headers);
+      setIsTimeSeriesMode(isTs);
+      if (isTs) {
+          // auto-enable options for this mode
+          setAnalysisOptions({
+              runMarkovOrderTest: true,
+              runTimeHomogeneityTest: true,
+          });
+      }
+    } catch (e) {
+      setIsTimeSeriesMode(false);
+    }
+  }, [csvString]);
+
+
   // Effect to automatically detect variables from CSV to use as a template for new models
   useEffect(() => {
     try {
       const data = parseCsvData(csvString);
       const headers = data.headers;
       
-      if (headers.length === 0) {
+      if (headers.length === 0 || isTimeSeriesEnsemble(headers)) {
         setTemplateVariables([]);
         return;
       }
@@ -87,7 +108,6 @@ export default function App() {
     saveTimeoutRef.current = window.setTimeout(() => {
       setSaveStatus('saving');
       
-      // Short delay to ensure 'Saving...' is rendered before state changes again
       setTimeout(() => {
         try {
           const modelsToSave = models.map(({ id, name, variables, probabilities }) => ({
@@ -105,15 +125,14 @@ export default function App() {
           
           setSaveStatus('saved');
 
-          // After 2 seconds, revert to idle state (hide the message)
           statusTimeoutRef.current = window.setTimeout(() => setSaveStatus('idle'), 2000);
 
         } catch (e) {
           console.error("Could not autosave session:", e);
-          setSaveStatus('idle'); // Revert to idle on error
+          setSaveStatus('idle');
         }
       }, 100);
-    }, 1500); // Debounce time: 1.5 seconds
+    }, 1500);
 
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
@@ -123,14 +142,12 @@ export default function App() {
 
 
   const handleNewSession = useCallback(() => {
-    // Clear state
     setCsvString('');
     setModels([]);
     setAnalysisResult(null);
     setExplanation(null);
     setError(null);
     setAnalysisOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
-    // Clear storage, which will trigger autosave for the new empty state
     try {
       localStorage.removeItem('stochastic-session');
     } catch (e) {
@@ -169,7 +186,6 @@ export default function App() {
       const results = analyzeData(data, parsedModels, analysisOptions);
       setAnalysisResult(results);
 
-      // Get explanation from Gemini service
       const geminiExplanation = await getAnalysisExplanation(results);
       setExplanation(geminiExplanation);
 
@@ -211,14 +227,24 @@ export default function App() {
 
         <div className="space-y-8">
           <DataInput value={csvString} onChange={setCsvString} />
-          <ModelsManager 
-            models={models}
-            setModels={setModels}
-            templateVariables={templateVariables}
-          />
+
+          {isTimeSeriesMode ? (
+            <div className="text-center p-4 bg-blue-900/30 border border-blue-700 rounded-lg">
+                <p className="font-semibold text-blue-300">Time Series Ensemble Mode Detected</p>
+                <p className="text-sm text-blue-400">A specialized self-dependence analysis will be performed. Model definition is disabled.</p>
+            </div>
+          ) : (
+            <ModelsManager 
+              models={models}
+              setModels={setModels}
+              templateVariables={templateVariables}
+            />
+          )}
+
           <AnalysisOptionsComponent
             options={analysisOptions}
             setOptions={setAnalysisOptions}
+            disabled={isTimeSeriesMode}
           />
         </div>
 

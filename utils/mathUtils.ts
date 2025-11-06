@@ -15,3 +15,15 @@ export function cartesianProduct<T>(...arrays: T[][]): T[][] {
     [[]]
   );
 }
+
+/**
+ * Transposes a 2D array (matrix).
+ * @param matrix The matrix to transpose.
+ * @returns The transposed matrix.
+ */
+export function transpose<T>(matrix: T[][]): T[][] {
+  if (!matrix || matrix.length === 0 || matrix[0].length === 0) {
+    return [];
+  }
+  return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]));
+}

@@ -5,16 +5,19 @@ interface ToggleSwitchProps {
   description: string;
   enabled: boolean;
   onChange: () => void;
+  disabled?: boolean;
 }
 
-export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ label, description, enabled, onChange }) => {
+export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ label, description, enabled, onChange, disabled = false }) => {
   return (
     <div
       onClick={onChange}
-      className="flex items-center justify-between p-4 bg-gray-900/50 rounded-lg cursor-pointer border border-gray-700 hover:bg-gray-700/50 transition-colors"
+      className={`flex items-center justify-between p-4 bg-gray-900/50 rounded-lg border border-gray-700 transition-colors ${
+        disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-700/50'
+      }`}
     >
       <div>
-        <h4 className="font-semibold text-gray-200">{label}</h4>
+        <h4 className={`font-semibold ${disabled ? 'text-gray-400' : 'text-gray-200'}`}>{label}</h4>
         <p className="text-sm text-gray-400">{description}</p>
       </div>
       <div

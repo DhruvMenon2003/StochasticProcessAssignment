@@ -1,6 +1,5 @@
 import React from 'react';
 import { AnalysisResult } from '../services/stochasticService';
-import { MetricCard } from './MetricCard';
 import { Distribution } from '../types';
 import { MarkovDisplay } from './MarkovDisplay';
 import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
@@ -10,6 +9,7 @@ import { ConditionalDistributionDisplay } from './ConditionalDistributionDisplay
 import { DependenceAnalysisDisplay } from './DependenceAnalysisDisplay';
 import { ConditionalMomentsDisplay } from './ConditionalMomentsDisplay';
 import { MomentsDisplay } from './MomentsDisplay';
+import { TimeSeriesResultsDisplay } from './TimeSeriesResultsDisplay';
 
 interface ResultsDisplayProps {
   results: AnalysisResult;
@@ -36,7 +36,6 @@ const JointDistributionTable: React.FC<{ dist: Distribution; title: string; head
                           return (
                               <tr key={key} className="border-b border-gray-700 last:border-b-0 hover:bg-gray-700/50 transition-colors">
                                   {states.map((s, i) => <td key={i} className="p-3">{s}</td>)}
-                                  {/* FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`. */}
                                   <td className="p-3">{(value as number).toFixed(4)}</td>
                               </tr>
                           );
@@ -55,7 +54,6 @@ const MarginalDistributionDisplay: React.FC<{ dist: Distribution; title: string;
           <div className="bg-gray-800 p-3 rounded-md text-sm font-mono whitespace-pre-wrap max-h-48 overflow-y-auto border border-gray-700">
               {Object.entries(dist)
                   .sort(([keyA], [keyB]) => keyA.localeCompare(keyB, undefined, { numeric: true }))
-                  // FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`.
                   .map(([key, value]) => `${key}: ${(value as number).toFixed(4)}`)
                   .join('\n')}
           </div>
@@ -65,10 +63,17 @@ const MarginalDistributionDisplay: React.FC<{ dist: Distribution; title: string;
 
 
 export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explanation }) => {
+  // Route to the specialized time-series display if applicable
+  if (results.isTimeSeriesEnsemble) {
+    return <TimeSeriesResultsDisplay results={results} explanation={explanation} />;
+  }
+  
+  // Route to single variable display
   if (results.isSingleVariable) {
     return <SingleVariableDisplay results={results} explanation={explanation} />;
   }
   
+  // Default to standard multi-variable display
   return (
     <div className="space-y-12">
       <div className="bg-gray-800/60 p-6 rounded-lg border border-gray-700">
@@ -184,14 +189,12 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ results, explana
         </div>
       ))}
      
-
       {results.markov && (
         <div>
           <h3 className="text-2xl font-bold text-gray-100 mb-4">First-Order Markov Chain Analysis</h3>
           <MarkovDisplay results={results.markov} />
         </div>
       )}
-      
     </div>
   );
 };
