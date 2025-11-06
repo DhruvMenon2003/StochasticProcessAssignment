@@ -1,13 +1,13 @@
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
 import { AnalysisOptions } from './components/AnalysisOptions';
 import { ResultsDisplay } from './components/ResultsDisplay';
-import { parseCsvData } from './utils/csvParser';
+import { parseCsvData, isTimeSeriesEnsemble } from './utils/csvParser';
 import { analyzeStochasticProcess } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, VariableDef, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisResult, AnalysisMode } from './types';
+import { CsvData, VariableDef, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
+import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
 
 const exampleData = `VarX,VarY
 A,1
@@ -20,10 +20,19 @@ A,1
 B,2
 C,1`;
 
+const exampleEnsembleData = `Time,Instance1,Instance2,Instance3,Instance4,Instance5
+Day1,1,2,1,3,1
+Day2,1,3,2,3,2
+Day3,2,3,2,1,2
+Day4,3,1,1,1,3`;
+
+
 function App() {
   const [csvString, setCsvString] = useState<string>(exampleData);
-  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('timeSeries');
+  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('joint');
   const [models, setModels] = useState<ModelDef[]>([]);
+  const [transitionMatrixModels, setTransitionMatrixModels] = useState<TransitionMatrixModelDef[]>([]);
+
   const [options, setOptions] = useState<AnalysisOptionsType>({
     runMarkovOrderTest: false,
     runTimeHomogeneityTest: false,
@@ -43,10 +52,40 @@ function App() {
     }
   }, [csvString]);
 
+  const isEnsemble = useMemo(() => isTimeSeriesEnsemble(parsedData), [parsedData]);
+
+  // Auto-switch mode and options based on data format
+  useEffect(() => {
+    if (isEnsemble) {
+      setAnalysisMode('timeSeriesEnsemble');
+      setOptions({ runMarkovOrderTest: true, runTimeHomogeneityTest: true });
+    } else {
+      // If not ensemble, default back to joint or whatever was selected
+      if(analysisMode === 'timeSeriesEnsemble') {
+          setAnalysisMode('joint');
+      }
+    }
+    // Set default options for regular time series mode
+    if (analysisMode === 'timeSeries') {
+      setOptions({ runMarkovOrderTest: true, runTimeHomogeneityTest: true });
+    } else if (!isEnsemble) {
+      setOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
+    }
+  }, [isEnsemble, analysisMode]);
+
+
   const templateVariables = useMemo<VariableDef[]>(() => {
     if (parsedData.headers.length === 0) return [];
     
-    // Infer states from data
+    // For ensemble, the variable is implicit, not based on headers
+    if(isEnsemble) {
+        const allStates = new Set(parsedData.rows.flatMap(row => row.slice(1)));
+        return [{
+            name: "State",
+            states: Array.from(allStates).sort().join(', '),
+        }];
+    }
+
     const uniqueStates: { [key: string]: Set<string | number> } = {};
     parsedData.headers.forEach(h => {
       uniqueStates[h] = new Set();
@@ -54,8 +93,9 @@ function App() {
 
     const headerIndexMap = new Map(parsedData.headers.map((h, i) => [h, i]));
 
-    parsedData.rows.forEach(row => {
-      parsedData.headers.forEach(h => {
+    // Fix: Add explicit types for row and h to prevent `unknown` type inference which can cause indexing errors.
+    parsedData.rows.forEach((row: (string | number)[]) => {
+      parsedData.headers.forEach((h: string) => {
         const index = headerIndexMap.get(h);
         if (index !== undefined && row[index] !== undefined && row[index] !== '') {
           uniqueStates[h].add(row[index]);
@@ -68,12 +108,13 @@ function App() {
       states: Array.from(uniqueStates[h]).sort().join(', '),
     }));
 
-  }, [parsedData]);
+  }, [parsedData, isEnsemble]);
   
-  // Reset models if headers change
+  // Reset models if headers/data format change
   useEffect(() => {
      setModels([]);
-  }, [templateVariables.map(v => v.name).join(',')]);
+     setTransitionMatrixModels([]);
+  }, [templateVariables.map(v => v.name).join(','), isEnsemble]);
 
 
   const handleAnalyze = useCallback(async () => {
@@ -87,7 +128,7 @@ function App() {
         throw new Error("No data provided to analyze.");
       }
       
-      const results = analyzeStochasticProcess(parsedData, models, analysisMode, options);
+      const results = analyzeStochasticProcess(parsedData, models, transitionMatrixModels, analysisMode, options);
       setAnalysisResult(results);
       
       const geminiExplanation = await getAnalysisExplanation(results);
@@ -99,9 +140,7 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [parsedData, models, analysisMode, options]);
-
-  const isTimeSeries = analysisMode !== 'joint';
+  }, [parsedData, models, transitionMatrixModels, analysisMode, options]);
 
   return (
     <div className="bg-gray-900 text-gray-200 min-h-screen font-sans">
@@ -111,6 +150,7 @@ function App() {
             <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
               Stochastic Process Analyzer
             </h1>
+             <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 p-1 rounded">Load Ensemble Example</button>
           </div>
         </div>
       </header>
@@ -118,9 +158,18 @@ function App() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-8">
             <DataInput value={csvString} onChange={setCsvString} />
-            <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />
-            {isTimeSeries && (
-                <AnalysisOptions options={options} setOptions={setOptions} disabled={analysisMode==='timeSeriesEnsemble'}/>
+            {isEnsemble ? (
+                <TransitionMatrixModelsManager
+                    models={transitionMatrixModels}
+                    setModels={setTransitionMatrixModels}
+                    states={templateVariables.length > 0 ? templateVariables[0].states.split(',').map(s=>s.trim()).filter(Boolean) : []}
+                />
+            ) : (
+                <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />
+            )}
+            
+            {(analysisMode === 'timeSeries' || isEnsemble) && (
+                <AnalysisOptions options={options} setOptions={setOptions} disabled={isEnsemble || analysisMode === 'timeSeries'}/>
             )}
           </div>
           <div className="lg:col-span-1">
@@ -130,17 +179,20 @@ function App() {
                 <div className="space-y-4">
                      <div>
                         <label className="block text-sm font-medium text-gray-400 mb-2">Analysis Mode</label>
-                        <select 
-                            value={analysisMode} 
-                            onChange={(e) => setAnalysisMode(e.target.value as AnalysisMode)}
-                            className="bg-gray-900 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
-                        >
-                            <option value="timeSeries">Time Series (Single Trace)</option>
-                            <option value="joint">Joint Distribution (Cross-sectional)</option>
-                            {/* <option value="timeSeriesEnsemble">Time Series (Ensemble)</option> */}
-                        </select>
+                        {isEnsemble ? (
+                             <div className="bg-gray-900 border border-gray-600 text-blue-300 text-sm rounded-lg block w-full p-2.5">Time Series (Ensemble) - Auto-detected</div>
+                        ) : (
+                            <select 
+                                value={analysisMode} 
+                                onChange={(e) => setAnalysisMode(e.target.value as AnalysisMode)}
+                                className="bg-gray-900 border border-gray-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5"
+                            >
+                                <option value="joint">Joint Distribution (Cross-sectional)</option>
+                                <option value="timeSeries">Time Series (Single Trace)</option>
+                            </select>
+                        )}
                         <p className="text-xs text-gray-500 mt-1">
-                            {analysisMode === 'timeSeries' ? 'Data is a single sequence over time.' : 'Each row is an independent observation.'}
+                            {analysisMode === 'timeSeries' ? 'Data is a single sequence over time.' : analysisMode === 'joint' ? 'Each row is an independent observation.' : 'Multiple time series instances detected.'}
                         </p>
                     </div>
 

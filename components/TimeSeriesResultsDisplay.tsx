@@ -3,7 +3,6 @@ import React from 'react';
 import { AnalysisResult } from '../types';
 import { ModelComparisonTable } from './ModelComparisonTable';
 import { MomentsDisplay } from './MomentsDisplay';
-import { DependenceAnalysisDisplay } from './DependenceAnalysisDisplay';
 import { MarkovDisplay } from './MarkovDisplay';
 import { AdvancedAnalysisDisplay } from './AdvancedAnalysisDisplay';
 
@@ -37,19 +36,12 @@ export const TimeSeriesResultsDisplay: React.FC<TimeSeriesResultsDisplayProps> =
             {results.bestModelName && results.modelResults.find(m => m.name === results.bestModelName) &&
                 <MomentsDisplay 
                     title={`Best Model Moments (${results.bestModelName})`} 
-                    moments={results.modelResults.find(m => m.name === results.bestModelName)!.distributions.moments} 
+                    moments={results.modelResults.find(m => m.name === results.bestModelName)!.distributions!.moments} 
                 />
             }
           </div>
 
         </div>
-      )}
-
-      {results.dependenceAnalysis && results.dependenceAnalysis.length > 0 && (
-          <div>
-              <h3 className="text-2xl font-bold text-gray-100 mb-4">Dependence Analysis</h3>
-              <DependenceAnalysisDisplay analysis={results.dependenceAnalysis} />
-          </div>
       )}
 
       {results.markovResults && (

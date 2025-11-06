@@ -1,14 +1,15 @@
 import React from 'react';
 
 interface TransitionMatrixDisplayProps {
-  matrix: number[][];
+  title?: string;
+  matrix: (number|null)[][];
   states: (string | number)[];
 }
 
-export const TransitionMatrixDisplay: React.FC<TransitionMatrixDisplayProps> = ({ matrix, states }) => {
+export const TransitionMatrixDisplay: React.FC<TransitionMatrixDisplayProps> = ({ title = "Transition Matrix", matrix, states }) => {
   return (
     <div>
-      <h4 className="font-semibold text-lg text-gray-300 mb-2">Transition Matrix</h4>
+      <h4 className="font-semibold text-lg text-gray-300 mb-2">{title}</h4>
       <p className="text-sm text-gray-400 mb-3">Probability P(X_t+1 = j | X_t = i)</p>
       <div className="bg-gray-800 rounded-md text-sm font-mono max-h-80 overflow-auto border border-gray-700">
         <table className="w-full text-left">
@@ -26,7 +27,7 @@ export const TransitionMatrixDisplay: React.FC<TransitionMatrixDisplayProps> = (
                 <th className="p-3 font-semibold bg-gray-800 sticky left-0">{String(states[i])}</th>
                 {row.map((prob, j) => (
                   <td key={j} className="p-3 text-center">
-                    {prob.toFixed(3)}
+                    {prob === null || prob === undefined ? '-' : prob.toFixed(3)}
                   </td>
                 ))}
               </tr>

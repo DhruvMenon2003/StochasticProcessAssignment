@@ -24,7 +24,7 @@ export const AnalysisOptions: React.FC<AnalysisOptionsProps> = ({ options, setOp
       </div>
       <p className="text-gray-400 mb-6">
         Enable advanced tests for deeper insights into the process characteristics.
-        {disabled && <span className="block text-sm text-blue-400 italic">Options are automatically enabled for Time Series Ensemble mode.</span>}
+        {disabled && <span className="block text-sm text-blue-400 italic">Options are automatically enabled for Time Series analysis modes.</span>}
       </p>
       <div className="space-y-4">
         <ToggleSwitch

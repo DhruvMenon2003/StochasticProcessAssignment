@@ -17,3 +17,14 @@ export function parseCsvData(csvString: string): CsvData {
 
   return { headers, rows };
 }
+
+export function isTimeSeriesEnsemble(data: CsvData): boolean {
+  if (data.headers.length < 2) return false;
+  const firstHeader = data.headers[0].toLowerCase();
+  const secondHeader = data.headers[1].toLowerCase();
+
+  return (
+    firstHeader === 'time' &&
+    secondHeader.startsWith('instance')
+  );
+}

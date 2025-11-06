@@ -1,5 +1,6 @@
 import React from 'react';
-import { AnalysisResult } from '../services/stochasticService';
+// Fix: Correct import path for AnalysisResult. It's defined in types.ts.
+import { AnalysisResult } from '../types';
 import { SingleVariableComparisonTable } from './SingleVariableComparisonTable';
 import { DistributionDetailCard } from './DistributionDetailCard';
 
@@ -44,9 +45,9 @@ export const SingleVariableDisplay: React.FC<SingleVariableDisplayProps> = ({ re
             <DistributionDetailCard
               key={modelResult.name}
               title={`Model: ${modelResult.name}`}
-              distribution={modelResult.distributions.marginals[variableName]}
-              cmf={modelResult.distributions.cmf}
-              moments={modelResult.distributions.moments ? modelResult.distributions.moments[variableName] : undefined}
+              distribution={modelResult.distributions!.marginals[variableName]}
+              cmf={modelResult.distributions!.cmf}
+              moments={modelResult.distributions!.moments ? modelResult.distributions!.moments[variableName] : undefined}
               isBest={modelResult.name === results.bestModelName}
             />
           ))}

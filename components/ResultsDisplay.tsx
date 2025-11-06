@@ -1,8 +1,8 @@
-
 import React from 'react';
 import { AnalysisResult, AnalysisMode } from '../types';
 import { SingleVariableDisplay } from './SingleVariableDisplay';
 import { TimeSeriesResultsDisplay } from './TimeSeriesResultsDisplay';
+import { TimeSeriesEnsembleResultsDisplay } from './TimeSeriesEnsembleResultsDisplay';
 
 interface ResultsDisplayProps {
   isLoading: boolean;
@@ -39,6 +39,10 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ isLoading, error
         <p className="text-gray-500">Input your data, define any models, and click "Analyze" to see the results here.</p>
       </div>
     );
+  }
+
+  if (results.isEnsemble) {
+      return <TimeSeriesEnsembleResultsDisplay results={results} explanation={explanation} />
   }
 
   const isSingleVariable = results.headers.length === 1;

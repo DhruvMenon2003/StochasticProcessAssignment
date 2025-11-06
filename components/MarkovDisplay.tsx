@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { MarkovResult } from '../services/stochasticService';
+import { MarkovResult } from '../types';
 import { TransitionMatrixDisplay } from './TransitionMatrixDisplay';
-import { StationaryDistributionDisplay } from './StationaryDistributionDisplay';
 
 interface MarkovDisplayProps {
   results: MarkovResult;
@@ -15,7 +14,7 @@ export const MarkovDisplay: React.FC<MarkovDisplayProps> = ({ results }) => {
     return null;
   }
 
-  const { states, transitionMatrix, stationaryDistribution } = results[selectedVar];
+  const { states, transitionMatrix } = results[selectedVar];
 
   return (
     <div className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700 space-y-6">
@@ -37,9 +36,8 @@ export const MarkovDisplay: React.FC<MarkovDisplayProps> = ({ results }) => {
         </select>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
-        <TransitionMatrixDisplay matrix={transitionMatrix} states={states} />
-        <StationaryDistributionDisplay distribution={stationaryDistribution} />
+      <div className="grid grid-cols-1 gap-8 items-start">
+        <TransitionMatrixDisplay matrix={transitionMatrix} states={states} title="Empirical Transition Matrix" />
       </div>
     </div>
   );

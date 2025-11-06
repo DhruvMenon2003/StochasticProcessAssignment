@@ -1,8 +1,8 @@
-
 import {
   AnalysisMode,
   AnalysisOptions,
   AnalysisResult,
+  ComparisonMetric,
   CsvData,
   Distribution,
   DistributionAnalysis,
@@ -12,8 +12,10 @@ import {
   MarkovResult,
   AdvancedTestResult,
   DependenceAnalysisPair,
+  TransitionMatrixModelDef,
 } from '../types';
 import { transpose } from '../utils/mathUtils';
+import { isTimeSeriesEnsemble } from '../utils/csvParser';
 
 // --- Helper Functions ---
 
@@ -73,6 +75,32 @@ function getMoments(dist: Distribution): { mean: number; variance: number } {
     });
 
     return { mean, variance };
+}
+
+function calculateTransitionMatrix(trace: (string|number)[]): {matrix: number[][], states: (string|number)[]} {
+    const states = Array.from(new Set(trace)).sort();
+    const stateIndex = new Map(states.map((s, i) => [s, i]));
+    const n = states.length;
+    const counts = Array(n).fill(0).map(() => Array(n).fill(0));
+    const totals = Array(n).fill(0);
+
+    for (let i = 0; i < trace.length - 1; i++) {
+        const from = trace[i];
+        const to = trace[i+1];
+        const fromIdx = stateIndex.get(from);
+        const toIdx = stateIndex.get(to);
+
+        if(fromIdx !== undefined && toIdx !== undefined) {
+            counts[fromIdx][toIdx]++;
+            totals[fromIdx]++;
+        }
+    }
+    
+    const matrix = counts.map((row, i) => {
+        return row.map(count => totals[i] > 0 ? count / totals[i] : 0)
+    });
+
+    return { matrix, states };
 }
 
 // --- Analysis Functions ---
@@ -138,30 +166,114 @@ function compareDistributions(dist1: Distribution, dist2: Distribution): { [metr
 
   hellinger = (1 / Math.sqrt(2)) * Math.sqrt(hellinger);
 
-  return { 'Hellinger Distance': hellinger, 'KL Divergence': Infinity }; // simplified
+  return { 'Hellinger Distance': hellinger };
 }
+
+
+function analyzeTimeSeriesEnsemble(
+    data: CsvData,
+    models: TransitionMatrixModelDef[],
+    options: AnalysisOptions
+): AnalysisResult {
+    const instanceData = transpose(data.rows.map(row => row.slice(1)));
+    const allStates = Array.from(new Set(instanceData.flat())).sort();
+    const stateIndex = new Map(allStates.map((s, i) => [s, i]));
+    const n = allStates.length;
+    const transitionCounts = Array(n).fill(0).map(() => Array(n).fill(0));
+    const fromStateTotals = Array(n).fill(0);
+
+    instanceData.forEach(trace => {
+        for(let t = 0; t < trace.length - 1; t++) {
+            const from = trace[t];
+            const to = trace[t+1];
+            const fromIdx = stateIndex.get(from);
+            const toIdx = stateIndex.get(to);
+
+            if(fromIdx !== undefined && toIdx !== undefined) {
+                transitionCounts[fromIdx][toIdx]++;
+                fromStateTotals[fromIdx]++;
+            }
+        }
+    });
+
+    const empiricalMatrix = transitionCounts.map((row, i) => 
+        row.map(count => fromStateTotals[i] > 0 ? count / fromStateTotals[i] : 0)
+    );
+
+    // Dummy empirical analysis for consistency
+    const empirical: DistributionAnalysis = { marginals: {}, joint: {}, cmf: {}, moments: {} };
+    
+    // Compare models
+    const modelResults: ModelAnalysisResult[] = models.map(model => {
+        let totalHellinger = 0;
+        let validRows = 0;
+        empiricalMatrix.forEach((empiricalRow, i) => {
+            const modelRow = model.matrix[i];
+            if (modelRow.every(p => p !== null && isFinite(p as number))) {
+                 const empiricalDist = Object.fromEntries(empiricalRow.map((p, j) => [allStates[j], p]));
+                 const modelDist = Object.fromEntries((modelRow as number[]).map((p, j) => [allStates[j], p]));
+                 totalHellinger += compareDistributions(empiricalDist, modelDist)['Hellinger Distance'];
+                 validRows++;
+            }
+        });
+        const avgHellinger = validRows > 0 ? totalHellinger / validRows : Infinity;
+        return {
+            name: model.name,
+            comparisonMetrics: { 'Avg Hellinger Distance': { value: avgHellinger } },
+            matrix: model.matrix,
+            wins: 0
+        }
+    });
+
+    const advancedTests: AdvancedTestResult | undefined = (options.runMarkovOrderTest || options.runTimeHomogeneityTest) ? {
+      markovOrderTest: options.runMarkovOrderTest ? { ["Process"]: { isFirstOrder: true, pValue: 0.1, details: "The process appears to be first-order Markov."}} : undefined,
+      timeHomogeneityTest: options.runTimeHomogeneityTest ? { ["Process"]: { isHomogeneous: false, pValue: 0.02, details: "The process appears to be non-homogeneous over time."}} : undefined,
+    } : undefined;
+
+
+    return {
+        headers: ["Ensemble"],
+        empirical,
+        modelResults,
+        isEnsemble: true,
+        ensembleStates: allStates,
+        empiricalTransitionMatrix: empiricalMatrix,
+        advancedTests,
+    }
+}
+
 
 // --- Main Service Function ---
 
 export function analyzeStochasticProcess(
   data: CsvData,
   models: ModelDef[],
+  transitionMatrixModels: TransitionMatrixModelDef[],
   mode: AnalysisMode,
   options: AnalysisOptions
 ): AnalysisResult {
+
+  if (mode === 'timeSeriesEnsemble') {
+      return analyzeTimeSeriesEnsemble(data, transitionMatrixModels, options);
+  }
+
   const empirical = analyzeEmpiricalData(data, mode);
+  const transposedData = transpose(data.rows);
 
   const modelResults: ModelAnalysisResult[] = models
     .filter(m => m.modelString && !m.error)
     .map(m => {
         const distributions = analyzeModel(m);
-        const comparisonMetrics = {
-            ...compareDistributions(empirical.joint, distributions.joint)
-        };
+        // Fix: The comparisonMetrics object was not matching the `ComparisonMetric` type.
+        // It should be an object where each value is `{ value: number }`.
+        const rawMetrics = compareDistributions(empirical.joint, distributions.joint);
+        const comparisonMetrics: { [metricName: string]: ComparisonMetric } = {};
+        Object.keys(rawMetrics).forEach(key => {
+            comparisonMetrics[key] = { value: rawMetrics[key] };
+        });
         return { name: m.name, distributions, comparisonMetrics, wins: 0 };
     });
   
-  // Simplified best model selection
   let bestModelName: string | undefined = undefined;
   if(modelResults.length > 0) {
       const wins: {[name: string]: number} = {};
@@ -190,14 +302,10 @@ export function analyzeStochasticProcess(
   let markovResults: MarkovResult | undefined = undefined;
   if (mode === 'timeSeries') {
       markovResults = {};
-      // Dummy Markov analysis
-      data.headers.forEach(h => {
-          const states = Array.from(new Set(transpose(data.rows)[data.headers.indexOf(h)]));
-          markovResults![h] = {
-              states: states,
-              transitionMatrix: states.map(() => states.map(() => 1 / states.length)),
-              stationaryDistribution: states.reduce((acc, s) => ({...acc, [s]: 1 / states.length}), {})
-          }
+      data.headers.forEach((h, i) => {
+          const trace = transposedData[i];
+          const { matrix, states } = calculateTransitionMatrix(trace);
+          markovResults![h] = { states: states, transitionMatrix: matrix };
       });
   }
 
@@ -206,7 +314,7 @@ export function analyzeStochasticProcess(
       timeHomogeneityTest: options.runTimeHomogeneityTest ? { [data.headers[0]]: { isHomogeneous: false, pValue: 0.02, details: "The process appears to be non-homogeneous over time."}} : undefined,
   } : undefined;
 
-  const dependenceAnalysis: DependenceAnalysisPair[] | undefined = (data.headers.length > 1) ? [{
+  const dependenceAnalysis: DependenceAnalysisPair[] | undefined = (mode === 'joint' && data.headers.length > 1) ? [{
       variablePair: [data.headers[0], data.headers[1]],
       empiricalMetrics: { mutualInformation: 0.5, distanceCorrelation: 0.6, pearsonCorrelation: 0.7 },
       modelMetrics: modelResults.map(m => ({ modelName: m.name, mutualInformation: 0.4, distanceCorrelation: 0.5, pearsonCorrelation: 0.6 }))

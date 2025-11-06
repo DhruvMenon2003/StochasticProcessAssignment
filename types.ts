@@ -1,4 +1,3 @@
-
 export interface CsvData {
   headers: string[];
   rows: (string | number)[][];
@@ -33,8 +32,8 @@ export interface ModelDef {
 export interface TransitionMatrixModelDef {
   id: string;
   name: string;
-  variableName: string;
-  states: string[];
+  variableName: string; // The variable this matrix applies to
+  states: (string | number)[];
   matrix: (number | null)[][];
   error: string | null;
 }
@@ -65,10 +64,12 @@ export interface ComparisonMetric {
 
 export interface ModelAnalysisResult {
   name: string;
-  distributions: DistributionAnalysis;
+  distributions?: DistributionAnalysis; // Optional for TM models
   comparisonMetrics?: { [metricName: string]: ComparisonMetric };
   wins?: number;
+  matrix?: (number|null)[][]; // For showing theoretical TM
 }
+
 
 export interface AnalysisResult {
   headers: string[];
@@ -80,6 +81,10 @@ export interface AnalysisResult {
   conditionalMoments?: ConditionalMomentsTable[];
   markovResults?: MarkovResult;
   advancedTests?: AdvancedTestResult;
+  // Fields specific to time-series ensemble analysis
+  isEnsemble?: boolean;
+  ensembleStates?: (string | number)[];
+  empiricalTransitionMatrix?: number[][];
 }
 
 export interface DependenceMetrics {
@@ -114,7 +119,7 @@ export interface MarkovResult {
   [variableName: string]: {
     states: (string | number)[];
     transitionMatrix: number[][];
-    stationaryDistribution: Distribution;
+    stationaryDistribution?: Distribution; // Made optional
   };
 }
 
