@@ -72,8 +72,8 @@ export interface ModelAnalysisResult {
 
 export interface OrderResult {
   order: number;
-  avgHellinger: number;
-  avgKlDivergence: number;
+  hellingerDistance: number;
+  klDivergence: number;
   marginals: { [time: string]: Distribution };
 }
 
@@ -89,6 +89,7 @@ export interface TimeBasedConditionalDistributionTable {
 export interface TimeBasedConditionalDistributionSet {
   order: number;
   distributions: TimeBasedConditionalDistributionTable[];
+  jointDistribution?: Distribution;
 }
 
 
@@ -96,6 +97,7 @@ export interface SelfDependenceAnalysis {
   orders: OrderResult[];
   conclusion: string;
   conditionalDistributionSets?: TimeBasedConditionalDistributionSet[];
+  timeSteps?: string[];
 }
 
 export interface AnalysisResult {

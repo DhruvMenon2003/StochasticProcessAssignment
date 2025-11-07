@@ -80,7 +80,8 @@ function App() {
     
     // For ensemble, the variable is implicit, not based on headers
     if(isEnsemble) {
-        const allStates = new Set(parsedData.rows.flatMap(row => row.slice(1)));
+        // FIX: Add explicit type for `row` to prevent `unknown` type inference.
+        const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
         return [{
             name: "State",
             states: Array.from(allStates).sort().join(', '),
@@ -88,7 +89,7 @@ function App() {
     }
 
     const uniqueStates: { [key: string]: Set<string | number> } = {};
-    // Fix: Add explicit types to array method callbacks to prevent `unknown` type inference which can cause indexing errors.
+    // FIX: Add explicit types to array method callbacks to prevent `unknown` type inference which can cause indexing errors.
     parsedData.headers.forEach((h: string) => {
       uniqueStates[h] = new Set();
     });

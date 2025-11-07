@@ -228,12 +228,11 @@ function analyzeSelfDependence(
     timeSteps: (string|number)[]
 ): SelfDependenceAnalysis {
     memo.clear();
-    const numInstances = instanceData.length;
     const numTimePoints = instanceData[0].length;
-    const results: OrderResult[] = [];
+    const jointDistributionsByOrder = new Map<number, Distribution>();
 
     // Pre-calculate all necessary conditional distributions
-    const conditionalDistributions: Map<string, Map<string, Distribution>> = new Map();
+    const conditionalDistributions = new Map<string, Map<string, Distribution>>();
     for (let t = 1; t < numTimePoints; t++) {
         for (let k = 1; k < numTimePoints; k++) {
             if (t-k < 0) break;
@@ -244,11 +243,11 @@ function analyzeSelfDependence(
     }
     const marginalT0 = normalize(getCounts(instanceData.map(trace => trace[0])));
 
+    const allPossibleSequences = cartesianProduct(...Array(numTimePoints).fill(states));
 
-    // Calculate joint and marginals for each order
+    // Calculate joint distribution for each order model
     for (let order = 1; order <= numTimePoints - 1; order++) {
         const jointDist: Distribution = {};
-        const allPossibleSequences = cartesianProduct(...Array(numTimePoints).fill(states));
         
         allPossibleSequences.forEach(sequence => {
             let prob = marginalT0[String(sequence[0])] || 0;
@@ -271,56 +270,43 @@ function analyzeSelfDependence(
                  jointDist[sequence.join('|')] = prob;
             }
         });
+        jointDistributionsByOrder.set(order, jointDist);
+    }
+    
+    // Compare each order's JOINT distribution to the full past (empirical) joint distribution
+    const orderResults: OrderResult[] = [];
+    const fullPastJointDist = jointDistributionsByOrder.get(numTimePoints - 1)!;
 
-        const marginals: { [time: string]: Distribution } = {};
-        const timeHeaders = Array.from({length: numTimePoints}, (_, i) => `T${i+1}`);
-        for (let t = 0; t < numTimePoints; t++) {
-            marginals[timeHeaders[t]] = getMarginal(jointDist, timeHeaders, t);
-        }
-        
-        results.push({ order, avgHellinger: 0, avgKlDivergence: 0, marginals });
+    for (let order = 1; order < numTimePoints - 1; order++) {
+        const modelJointDist = jointDistributionsByOrder.get(order)!;
+        const metrics = compareDistributions(modelJointDist, fullPastJointDist);
+
+        orderResults.push({ 
+            order, 
+            hellingerDistance: metrics['Hellinger Distance'], 
+            klDivergence: metrics['KL Divergence'],
+            marginals: {} // Not used for comparison anymore, but kept for type consistency
+        });
     }
 
-    const fullPastResult = results[results.length - 1];
+    // Generate conclusion based on the new test for Markovian property
+    let conclusion: string;
+    if (numTimePoints < 4) {
+        conclusion = "The dataset has too few time points (less than 4) to perform a meaningful statistical test for the Markovian property using this method.";
+    } else if (orderResults.length > 0) {
+        const markovResult = orderResults[0]; // order 1
+        const highOrderResult = orderResults[orderResults.length - 1]; // order n-2
+        const distanceDiff = Math.abs(markovResult.hellingerDistance - highOrderResult.hellingerDistance);
 
-    // Compare each order's marginals to the full past marginals
-    results.forEach(res => {
-        if (res.order === numTimePoints - 1) { // This is the full past model itself
-             res.avgHellinger = 0;
-             res.avgKlDivergence = 0;
-             return;
+        if (distanceDiff < 0.05) { // Threshold for "not statistically different"
+            conclusion = `The process appears to be **Markovian (1st-order)**. The Hellinger Distance between the Markovian model's joint distribution and the empirical distribution is ${markovResult.hellingerDistance.toFixed(4)}, which is very close to the distance for a high-order (${highOrderResult.order}-order) model (${highOrderResult.hellingerDistance.toFixed(4)}). This suggests that memory beyond one step does not significantly alter the process's overall behavior.`;
+        } else {
+            conclusion = `The process is likely **not Markovian**. It exhibits longer-term memory. The Hellinger Distance for the Markovian model (${markovResult.hellingerDistance.toFixed(4)}) is significantly different from that of a high-order (${highOrderResult.order}-order) model (${highOrderResult.hellingerDistance.toFixed(4)}), indicating that past states beyond the most recent one are important for predicting the future.`;
         }
-
-        let totalHellinger = 0;
-        let totalKl = 0;
-        for (let t = 0; t < numTimePoints; t++) {
-             const timeHeader = `T${t+1}`;
-             const metrics = compareDistributions(res.marginals[timeHeader], fullPastResult.marginals[timeHeader]);
-             totalHellinger += metrics['Hellinger Distance'];
-             totalKl += metrics['KL Divergence'];
-        }
-        res.avgHellinger = totalHellinger / numTimePoints;
-        res.avgKlDivergence = totalKl / numTimePoints;
-    });
-
-    // Generate conclusion
-    let conclusion = "The analysis could not determine a specific order of dependence. The process may be complex or data may be too sparse.";
-    if (results.length > 1) {
-        const highOrderResult = results[results.length-2]; // n-2 order
-        let bestOrder = 1;
-        for(let i=0; i < results.length - 2; i++) {
-            const currentOrderResult = results[i];
-            // If the distance for this order is very close to the high order distance, it's a good candidate
-            if (Math.abs(currentOrderResult.avgHellinger - highOrderResult.avgHellinger) < 0.01) {
-                bestOrder = currentOrderResult.order;
-                break;
-            }
-        }
-         conclusion = `The process appears to be of **${bestOrder}-order**. The ${bestOrder}-order model's marginal distributions are very close to those of a high-order model, suggesting that memory beyond ${bestOrder} step(s) does not significantly alter the process's long-term behavior.`;
-         if(bestOrder === 1) {
-             conclusion = `The process appears to be **Markovian (1st-order)**. The Markovian model's marginal distributions are very close to those of a high-order model, suggesting that the process has limited memory and the current state is primarily dependent on the immediately preceding state.`;
-         }
+    } else {
+        conclusion = "The analysis could not determine a specific order of dependence. The process may be complex or data may be too sparse.";
     }
+
 
     // Format conditional distributions for display
     const conditionalDistributionSets: TimeBasedConditionalDistributionSet[] = [];
@@ -357,11 +343,15 @@ function analyzeSelfDependence(
                 matrix
             });
         }
-        conditionalDistributionSets.push({ order, distributions: distributionsForThisOrder });
+        conditionalDistributionSets.push({ 
+            order, 
+            distributions: distributionsForThisOrder,
+            jointDistribution: jointDistributionsByOrder.get(order)
+        });
     }
 
 
-    return { orders: results.slice(0, -1), conclusion, conditionalDistributionSets };
+    return { orders: orderResults, conclusion, conditionalDistributionSets, timeSteps: timeSteps.map(String) };
 }
 
 
@@ -370,7 +360,7 @@ function analyzeTimeSeriesEnsemble(
     models: TransitionMatrixModelDef[],
     options: AnalysisOptions
 ): AnalysisResult {
-    // Fix: Add explicit type for `row` to ensure `instanceData` is correctly typed as (string | number)[][] instead of unknown[][].
+    // FIX: Add explicit type for `row` to ensure `instanceData` is correctly typed as (string | number)[][] instead of unknown[][].
     const instanceData = transpose(data.rows.map((row: (string|number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
@@ -490,42 +480,40 @@ export function analyzeStochasticProcess(
           });
           if(winner) wins[winner]++;
       });
-      modelResults.forEach(m => m.wins = wins[m.name]);
-      const sortedWins = Object.entries(wins).sort((a, b) => b[1] - a[1]);
-      if (sortedWins.length > 0) {
-        bestModelName = sortedWins[0][0];
-      }
-  }
-
-
-  let markovResults: MarkovResult | undefined = undefined;
-  if (mode === 'timeSeries') {
-      markovResults = {};
-      data.headers.forEach((h, i) => {
-          const trace = transposedData[i];
-          const { matrix, states } = calculateTransitionMatrix(trace);
-          markovResults![h] = { states: states, transitionMatrix: matrix };
+      
+      modelResults.forEach(m => {
+          m.wins = wins[m.name];
+           Object.keys(m.comparisonMetrics!).forEach(metric => {
+               let isWinner = true;
+               for(const otherM of modelResults) {
+                   if(otherM.comparisonMetrics![metric].value < m.comparisonMetrics![metric].value) {
+                       isWinner = false;
+                       break;
+                   }
+               }
+               m.comparisonMetrics![metric].isWinner = isWinner;
+           })
       });
+
+      bestModelName = Object.keys(wins).reduce((a, b) => wins[a] > wins[b] ? a : b);
   }
 
-  const advancedTests: AdvancedTestResult | undefined = (options.runMarkovOrderTest || options.runTimeHomogeneityTest) ? {
-      markovOrderTest: options.runMarkovOrderTest ? { [data.headers[0]]: { isFirstOrder: true, pValue: 0.1, details: "The process appears to be first-order Markov."}} : undefined,
-      timeHomogeneityTest: options.runTimeHomogeneityTest ? { [data.headers[0]]: { isHomogeneous: false, pValue: 0.02, details: "The process appears to be non-homogeneous over time."}} : undefined,
-  } : undefined;
 
-  const dependenceAnalysis: DependenceAnalysisPair[] | undefined = (mode === 'joint' && data.headers.length > 1) ? [{
-      variablePair: [data.headers[0], data.headers[1]],
-      empiricalMetrics: { mutualInformation: 0.5, distanceCorrelation: 0.6, pearsonCorrelation: 0.7 },
-      modelMetrics: modelResults.map(m => ({ modelName: m.name, mutualInformation: 0.4, distanceCorrelation: 0.5, pearsonCorrelation: 0.6 }))
-  }] : undefined;
+  let markovResult: MarkovResult | undefined = undefined;
+  if(mode === 'timeSeries') {
+    markovResult = {};
+    data.headers.forEach((h, i) => {
+        const {matrix, states} = calculateTransitionMatrix(transposedData[i]);
+        markovResult![h] = { states, transitionMatrix: matrix };
+    });
+  }
+
 
   return {
     headers: data.headers,
     empirical,
     modelResults,
     bestModelName,
-    markovResults,
-    advancedTests,
-    dependenceAnalysis
+    markovResults: markovResult
   };
 }
