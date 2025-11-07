@@ -3,6 +3,7 @@ import { AnalysisResult, AnalysisMode } from '../types';
 import { SingleVariableDisplay } from './SingleVariableDisplay';
 import { TimeSeriesResultsDisplay } from './TimeSeriesResultsDisplay';
 import { TimeSeriesEnsembleResultsDisplay } from './TimeSeriesEnsembleResultsDisplay';
+import { JointMultivariateResultsDisplay } from './JointMultivariateResultsDisplay';
 
 interface ResultsDisplayProps {
   isLoading: boolean;
@@ -40,19 +41,29 @@ export const ResultsDisplay: React.FC<ResultsDisplayProps> = ({ isLoading, error
       </div>
     );
   }
-
+  
+  // New architectural routing logic
   if (results.isEnsemble) {
       return <TimeSeriesEnsembleResultsDisplay results={results} explanation={explanation} />
   }
 
-  const isSingleVariable = results.headers.length === 1;
-
-  if (isSingleVariable) {
-      return <SingleVariableDisplay results={results} explanation={explanation} />
+  if (mode === 'timeSeries') {
+      return <TimeSeriesResultsDisplay results={results} explanation={explanation} />
   }
 
-  // Both timeSeries and joint (if multivariate) can use this display.
-  // We can differentiate behavior inside TimeSeriesResultsDisplay if needed.
-  return <TimeSeriesResultsDisplay results={results} explanation={explanation} />
+  if (mode === 'joint') {
+      if (results.headers.length === 1) {
+          return <SingleVariableDisplay results={results} explanation={explanation} />
+      } else {
+          return <JointMultivariateResultsDisplay results={results} explanation={explanation} />
+      }
+  }
 
+  // Fallback for any unhandled case
+  return (
+      <div className="p-6 bg-yellow-900/30 rounded-lg border border-yellow-500">
+        <h2 className="text-xl font-semibold text-yellow-300">Display Error</h2>
+        <p className="text-yellow-400 font-mono mt-2">Could not determine the correct display format for the analysis mode '{mode}'.</p>
+      </div>
+  );
 };

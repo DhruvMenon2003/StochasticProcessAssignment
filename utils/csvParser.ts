@@ -1,4 +1,4 @@
-import { CsvData } from '../types';
+import { CsvData, AnalysisMode } from '../types';
 
 export function parseCsvData(csvString: string): CsvData {
   const lines = csvString.trim().split('\n');
@@ -18,13 +18,24 @@ export function parseCsvData(csvString: string): CsvData {
   return { headers, rows };
 }
 
-export function isTimeSeriesEnsemble(data: CsvData): boolean {
-  if (data.headers.length < 2) return false;
-  const firstHeader = data.headers[0].toLowerCase();
-  const secondHeader = data.headers[1].toLowerCase();
+export function detectAnalysisMode(data: CsvData): AnalysisMode {
+  if (data.headers.length === 0) {
+    return 'joint'; // Default for empty/invalid data
+  }
+  
+  const firstHeader = data.headers[0]?.toLowerCase().trim();
+  const secondHeader = data.headers[1]?.toLowerCase().trim();
 
-  return (
-    firstHeader === 'time' &&
-    secondHeader.startsWith('instance')
-  );
+  // Rule 1: Ensemble
+  if (data.headers.length >= 2 && firstHeader === 'time' && secondHeader?.startsWith('instance')) {
+    return 'timeSeriesEnsemble';
+  }
+  
+  // Rule 2: Single Time Series
+  if (firstHeader === 'time') {
+    return 'timeSeries';
+  }
+
+  // Rule 3: Cross-Sectional
+  return 'joint';
 }

@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
+
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
 import { AnalysisOptions } from './components/AnalysisOptions';
 import { ResultsDisplay } from './components/ResultsDisplay';
-import { parseCsvData, isTimeSeriesEnsemble } from './utils/csvParser';
-import { performAnalysis } from './services/stochasticService';
+import { parseCsvData, detectAnalysisMode } from './utils/csvParser';
+import { analyzeStochasticProcess } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, AnalysisResult, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisMode, VariableDef, TransitionMatrixModelDef } from './types';
+import { CsvData, VariableDef, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
 import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
 
 const exampleData = `VarX,VarY
@@ -20,127 +21,205 @@ A,1
 B,2
 C,1`;
 
-const App: React.FC = () => {
-  const [data, setData] = useState<string>(exampleData);
-  const [parsedData, setParsedData] = useState<CsvData | null>(null);
-  const [analysisMode, setAnalysisMode] = useState<AnalysisMode>('cross-sectional');
+const exampleEnsembleData = `Time,Instance1,Instance2,Instance3,Instance4,Instance5
+Day1,1,2,1,3,1
+Day2,1,3,2,3,2
+Day3,2,3,2,1,2
+Day4,3,1,1,1,3`;
+
+
+function App() {
+  const [csvString, setCsvString] = useState<string>(exampleData);
   const [models, setModels] = useState<ModelDef[]>([]);
-  const [tmModels, setTmModels] = useState<TransitionMatrixModelDef[]>([]);
-  const [templateVariables, setTemplateVariables] = useState<VariableDef[]>([]);
-  const [ensembleStates, setEnsembleStates] = useState<(string|number)[]>([]);
+  const [transitionMatrixModels, setTransitionMatrixModels] = useState<TransitionMatrixModelDef[]>([]);
 
-  const [options, setOptions] = useState<AnalysisOptionsType>({ runMarkovOrderTest: false });
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [options, setOptions] = useState<AnalysisOptionsType>({
+    runMarkovOrderTest: false,
+    runTimeHomogeneityTest: false,
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [results, setResults] = useState<AnalysisResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
-  
-  useEffect(() => {
-    try {
-      const pData = parseCsvData(data);
-      setParsedData(pData);
-      
-      if (isTimeSeriesEnsemble(pData)) {
-          setAnalysisMode('time-series-ensemble');
-          const states = Array.from(new Set(pData.rows.flatMap(row => row.slice(1))));
-          setEnsembleStates(states);
-      } else if (pData.headers.length > 0 && pData.headers[0].toLowerCase() === 'time') {
-          setAnalysisMode('time-series');
-      } else {
-          setAnalysisMode('cross-sectional');
-      }
-      
-      const newVars = pData.headers.map(h => ({ name: h, states: '' }));
-      setTemplateVariables(newVars);
 
+  const parsedData = useMemo<CsvData>(() => {
+    try {
+      return parseCsvData(csvString);
     } catch (e) {
-      setError("Failed to parse CSV data.");
-      setParsedData(null);
+      console.error("CSV parsing error:", e);
+      return { headers: [], rows: [] };
     }
-  }, [data]);
-  
+  }, [csvString]);
+
+  const analysisMode = useMemo(() => detectAnalysisMode(parsedData), [parsedData]);
+  const isEnsemble = analysisMode === 'timeSeriesEnsemble';
+
+  // Auto-switch options based on data format
   useEffect(() => {
-      if(analysisMode === 'time-series' || analysisMode === 'time-series-ensemble') {
-          setOptions({ runMarkovOrderTest: true });
-      } else {
-          setOptions({ runMarkovOrderTest: false });
-      }
-  }, [analysisMode]);
+    const isTimeSeries = analysisMode === 'timeSeries' || isEnsemble;
+    if (isTimeSeries) {
+      setOptions({ runMarkovOrderTest: true, runTimeHomogeneityTest: true });
+    } else {
+      setOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
+    }
+  }, [analysisMode, isEnsemble]);
+
+
+  const templateVariables = useMemo<VariableDef[]>(() => {
+    if (parsedData.headers.length === 0) return [];
+    
+    // For ensemble, the variable is implicit, not based on headers
+    if(isEnsemble) {
+        // Add explicit type for `row` to prevent `unknown` type inference.
+        const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
+        return [{
+            name: "State",
+            states: Array.from(allStates).sort().join(', '),
+        }];
+    }
+
+    const uniqueStates: { [key: string]: Set<string | number> } = {};
+    // FIX: Add explicit types to callback parameters to prevent them from being inferred as 'unknown', which causes indexing errors.
+    parsedData.headers.forEach((h: string) => {
+      uniqueStates[h] = new Set();
+    });
+
+    const headerIndexMap = new Map(parsedData.headers.map((h: string, i: number) => [h, i]));
+
+    parsedData.rows.forEach((row: (string | number)[]) => {
+      // FIX: Add explicit types to `forEach` callback parameters to prevent them from being inferred as `unknown` and causing "Type 'unknown' cannot be used as an index type" errors.
+      parsedData.headers.forEach((h: string) => {
+        const index = headerIndexMap.get(h);
+        if (index !== undefined && row[index] !== undefined && row[index] !== '') {
+          uniqueStates[h].add(row[index]);
+        }
+      });
+    });
+
+    return parsedData.headers.map((h: string) => ({
+      name: h,
+      states: Array.from(uniqueStates[h]).sort().join(', '),
+    }));
+
+  }, [parsedData, isEnsemble]);
+  
+  // Reset models if headers/data format change
+  useEffect(() => {
+     setModels([]);
+     setTransitionMatrixModels([]);
+  }, [templateVariables.map(v => v.name).join(','), isEnsemble]);
+
 
   const handleAnalyze = useCallback(async () => {
-    if (!parsedData) {
-      setError("No data to analyze.");
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
-    setResults(null);
+    setAnalysisResult(null);
     setExplanation(null);
 
     try {
-      const analysisResults = performAnalysis(parsedData, models, tmModels, options, analysisMode);
-      setResults(analysisResults);
+      if (parsedData.rows.length === 0) {
+        throw new Error("No data provided to analyze.");
+      }
       
-      const geminiExplanation = await getAnalysisExplanation(analysisResults);
+      const results = analyzeStochasticProcess(parsedData, models, transitionMatrixModels, analysisMode, options);
+      setAnalysisResult(results);
+      
+      const geminiExplanation = await getAnalysisExplanation(results);
       setExplanation(geminiExplanation);
 
     } catch (e: any) {
       setError(e.message || "An unexpected error occurred during analysis.");
-      setResults(null);
+      console.error(e);
     } finally {
       setIsLoading(false);
     }
-  }, [parsedData, models, tmModels, options, analysisMode]);
+  }, [parsedData, models, transitionMatrixModels, analysisMode, options]);
 
-  const isAnalysisDisabled = !parsedData || parsedData.rows.length === 0 || models.some(m => m.error) || tmModels.some(m => m.error);
+  const modeDisplayNames: Record<AnalysisMode, string> = {
+    joint: "Cross-Sectional",
+    timeSeries: "Time Series (Single Trace)",
+    timeSeriesEnsemble: "Time Series (Ensemble)"
+  };
 
-  const AnalysisManager = () => {
-    if (analysisMode === 'time-series-ensemble') {
-        return <TransitionMatrixModelsManager models={tmModels} setModels={setTmModels} states={ensembleStates} />
-    }
-    return <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />;
-  }
+  const modeDescriptions: Record<AnalysisMode, string> = {
+      joint: "Each row is treated as an independent observation.",
+      timeSeries: "'Time' column detected. Each row is treated as a sequential time step.",
+      timeSeriesEnsemble: "Ensemble format ('Time', 'Instance1'...) detected."
+  };
 
   return (
     <div className="bg-gray-900 text-gray-200 min-h-screen font-sans">
-      <header className="bg-gray-800/50 backdrop-blur-sm sticky top-0 z-20 border-b border-gray-700">
-        <div className="container mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
-            Stochastic Process Analyzer
-          </h1>
-          <button
-            onClick={handleAnalyze}
-            disabled={isAnalysisDisabled || isLoading}
-            className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed transition-colors"
-          >
-            {isLoading ? 'Analyzing...' : 'Analyze'}
-          </button>
+      <header className="bg-gray-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-gray-700">
+        <div className="container mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center justify-between h-16">
+            <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
+              Stochastic Process Analyzer
+            </h1>
+             <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 p-1 rounded">Load Ensemble Example</button>
+          </div>
         </div>
       </header>
-
-      <main className="container mx-auto p-6 space-y-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+      <main className="container mx-auto p-4 sm:p-6 lg:p-8">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-8">
-            <DataInput value={data} onChange={setData} />
-            <AnalysisManager />
-            {(analysisMode === 'time-series' || analysisMode === 'time-series-ensemble') &&
-                <AnalysisOptions options={options} setOptions={setOptions} disabled={true}/>
-            }
+            <DataInput value={csvString} onChange={setCsvString} />
+            {isEnsemble ? (
+                <TransitionMatrixModelsManager
+                    models={transitionMatrixModels}
+                    setModels={setTransitionMatrixModels}
+                    states={templateVariables.length > 0 ? templateVariables[0].states.split(',').map(s=>s.trim()).filter(Boolean) : []}
+                />
+            ) : (
+                <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />
+            )}
+            
+            <AnalysisOptions 
+                options={options} 
+                setOptions={setOptions} 
+                disabled={analysisMode === 'timeSeries' || isEnsemble}
+            />
           </div>
-          <div className="sticky top-24">
-            <ResultsDisplay
+          <div className="lg:col-span-1">
+            <div className="sticky top-20">
+              <div className="bg-gray-800/50 p-6 rounded-lg shadow-md border border-gray-700">
+                <h2 className="text-2xl font-bold text-gray-100 mb-4">Run Analysis</h2>
+                <div className="space-y-4">
+                     <div>
+                        <label className="block text-sm font-medium text-gray-400 mb-2">Analysis Mode</label>
+                         <div className="bg-gray-900 border border-gray-600 text-blue-300 text-sm rounded-lg block w-full p-2.5">
+                            {modeDisplayNames[analysisMode]} <span className="text-gray-500">- Auto-detected</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">
+                            {modeDescriptions[analysisMode]}
+                        </p>
+                    </div>
+
+                    <button
+                      onClick={handleAnalyze}
+                      disabled={isLoading || parsedData.rows.length === 0}
+                      className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-lg transition-colors text-lg"
+                    >
+                      {isLoading ? 'Analyzing...' : 'Analyze'}
+                    </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <div className="mt-12">
+           <ResultsDisplay 
               isLoading={isLoading}
               error={error}
-              results={results}
+              results={analysisResult}
               explanation={explanation}
               mode={analysisMode}
             />
-          </div>
         </div>
       </main>
     </div>
   );
-};
+}
 
 export default App;
