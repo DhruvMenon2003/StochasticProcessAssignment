@@ -97,6 +97,8 @@ function App() {
     const headerIndexMap = new Map(parsedData.headers.map((h: string, i: number) => [h, i]));
 
     parsedData.rows.forEach((row: (string | number)[]) => {
+      // FIX: Add explicit types to `forEach` callback parameters to prevent them from being inferred as `unknown`.
+      // This resolves "Type 'unknown' cannot be used as an index type" errors.
       parsedData.headers.forEach((h: string) => {
         const index = headerIndexMap.get(h);
         if (index !== undefined && row[index] !== undefined && row[index] !== '') {
