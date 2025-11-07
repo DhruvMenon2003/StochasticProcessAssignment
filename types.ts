@@ -73,7 +73,7 @@ export interface ModelAnalysisResult {
 export interface OrderResult {
   order: number;
   hellingerDistance: number;
-  klDivergence: number;
+  jensenShannonDistance: number;
   marginals: { [time: string]: Distribution };
 }
 

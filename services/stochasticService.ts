@@ -18,7 +18,7 @@ import {
   TimeBasedConditionalDistributionSet,
   TimeBasedConditionalDistributionTable,
 } from '../types';
-import { transpose, cartesianProduct, klDivergence } from '../utils/mathUtils';
+import { transpose, cartesianProduct, jensenShannonDistance } from '../utils/mathUtils';
 import { isTimeSeriesEnsemble } from '../utils/csvParser';
 
 // --- Helper Functions ---
@@ -170,7 +170,7 @@ function compareDistributions(dist1: Distribution, dist2: Distribution): { [metr
 
   hellinger = (1 / Math.sqrt(2)) * Math.sqrt(hellinger);
 
-  return { 'Hellinger Distance': hellinger, 'KL Divergence': klDivergence(dist1, dist2) };
+  return { 'Hellinger Distance': hellinger, 'Jensen-Shannon Distance': jensenShannonDistance(dist1, dist2) };
 }
 
 
@@ -284,7 +284,7 @@ function analyzeSelfDependence(
         orderResults.push({ 
             order, 
             hellingerDistance: metrics['Hellinger Distance'], 
-            klDivergence: metrics['KL Divergence'],
+            jensenShannonDistance: metrics['Jensen-Shannon Distance'],
             marginals: {} // Not used for comparison anymore, but kept for type consistency
         });
     }
@@ -361,7 +361,7 @@ function analyzeTimeSeriesEnsemble(
     options: AnalysisOptions
 ): AnalysisResult {
     // FIX: Add explicit type for `row` to ensure `instanceData` is correctly typed as (string | number)[][] instead of unknown[][].
-    const instanceData = transpose(data.rows.map((row: (string|number)[]) => row.slice(1)));
+    const instanceData = transpose(data.rows.map((row: (string | number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }

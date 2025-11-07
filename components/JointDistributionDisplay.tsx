@@ -7,8 +7,8 @@ interface JointDistributionDisplayProps {
 }
 
 export const JointDistributionDisplay: React.FC<JointDistributionDisplayProps> = ({ distribution, headers }) => {
-  // FIX: Cast probability values to number for sorting, as Object.entries can infer them as `unknown`.
-  const sortedEntries = Object.entries(distribution).sort(([, probA], [, probB]) => (probB as number) - (probA as number));
+  // Sort entries lexicographically by the state sequence key (e.g., "A|A|B", "A|B|A")
+  const sortedEntries = Object.entries(distribution).sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
 
   if (sortedEntries.length === 0) {
     return (

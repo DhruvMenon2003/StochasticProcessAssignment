@@ -80,7 +80,7 @@ function App() {
     
     // For ensemble, the variable is implicit, not based on headers
     if(isEnsemble) {
-        // FIX: Add explicit type for `row` to prevent `unknown` type inference.
+        // Add explicit type for `row` to prevent `unknown` type inference.
         const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
         return [{
             name: "State",

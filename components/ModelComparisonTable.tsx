@@ -9,7 +9,7 @@ interface ModelComparisonTableProps {
 
 const metricLabels: { [key: string]: string } = {
     'Hellinger Distance': 'Hellinger Distance',
-    'KL Divergence': 'KL Divergence'
+    'Jensen-Shannon Distance': 'Jensen-Shannon Distance'
 };
 
 

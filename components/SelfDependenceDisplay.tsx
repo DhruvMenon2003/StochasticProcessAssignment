@@ -21,7 +21,7 @@ export const SelfDependenceDisplay: React.FC<SelfDependenceDisplayProps> = ({ an
                     <tr className="border-b border-gray-600">
                         <th className="p-3 font-semibold text-gray-300">Order (k)</th>
                         <th className="p-3 font-semibold text-gray-300 text-center">Hellinger Distance (vs. Full Past)</th>
-                        <th className="p-3 font-semibold text-gray-300 text-center">KL Divergence (vs. Full Past)</th>
+                        <th className="p-3 font-semibold text-gray-300 text-center">Jensen-Shannon Distance (vs. Full Past)</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -32,7 +32,7 @@ export const SelfDependenceDisplay: React.FC<SelfDependenceDisplayProps> = ({ an
                             </td>
                             <td className="p-3 text-center text-teal-300">{result.hellingerDistance.toFixed(5)}</td>
                             <td className="p-3 text-center text-blue-300">
-                                {isFinite(result.klDivergence) ? result.klDivergence.toFixed(5) : 'Infinity'}
+                                {result.jensenShannonDistance.toFixed(5)}
                             </td>
                         </tr>
                     ))}

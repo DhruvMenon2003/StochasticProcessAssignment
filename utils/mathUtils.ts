@@ -55,3 +55,33 @@ export function klDivergence(dist1: Distribution, dist2: Distribution): number {
 
   return divergence;
 }
+
+
+/**
+ * Calculates the square root of the Jensen-Shannon Divergence, which is a true metric.
+ * It is symmetric and bounded.
+ * @param dist1 The first distribution.
+ * @param dist2 The second distribution.
+ * @returns The Jensen-Shannon Distance.
+ */
+export function jensenShannonDistance(dist1: Distribution, dist2: Distribution): number {
+  const allKeys = Array.from(new Set([...Object.keys(dist1), ...Object.keys(dist2)]));
+  const m: Distribution = {};
+
+  // Calculate midpoint distribution M
+  for (const key of allKeys) {
+    const p1 = dist1[key] || 0;
+    const p2 = dist2[key] || 0;
+    m[key] = (p1 + p2) / 2;
+  }
+
+  const kl1 = klDivergence(dist1, m);
+  const kl2 = klDivergence(dist2, m);
+
+  // kl1 and kl2 will not be Infinity because if dist1[key] > 0, then m[key] must be > 0.
+  
+  const jsd = 0.5 * kl1 + 0.5 * kl2;
+  
+  // The result is the square root of the JSD.
+  return Math.sqrt(jsd);
+}

@@ -33,10 +33,10 @@ function formatAnalysisForPrompt(analysis: AnalysisResult): string {
             **Self-Dependence Order Analysis (Process Memory):**
             This analysis determines if the process's future depends only on the immediate past (Markovian, 1st-order) or on a longer history.
             - We compare joint probability distributions of different order models against the empirical (full past) distribution.
-            - Hellinger Distance measures the difference. Lower is better.
+            - Hellinger Distance and Jensen-Shannon Distance measure the difference. Lower is better.
             
             - **Results Table:**
-            ${analysis.selfDependenceAnalysis.orders.map(o => `  - Order ${o.order}: Hellinger Distance = ${o.hellingerDistance.toFixed(5)}, KL Divergence = ${isFinite(o.klDivergence) ? o.klDivergence.toFixed(5) : 'Infinity'}`).join('\n')}
+            ${analysis.selfDependenceAnalysis.orders.map(o => `  - Order ${o.order}: Hellinger Distance = ${o.hellingerDistance.toFixed(5)}, Jensen-Shannon Distance = ${o.jensenShannonDistance.toFixed(5)}`).join('\n')}
             
             - **Analysis Conclusion:** "${analysis.selfDependenceAnalysis.conclusion.replace(/<[^>]*>?/gm, '')}" 
         `;
@@ -70,7 +70,7 @@ function formatAnalysisForPrompt(analysis: AnalysisResult): string {
       standardPrompt += `
         **Model Comparison:**
         Theoretical models were compared against the empirical data's joint distribution.
-        - Best Fitting Model: ${analysis.bestModelName || 'N/A'} based on Hellinger Distance and KL Divergence. Lower is better.
+        - Best Fitting Model: ${analysis.bestModelName || 'N/A'} based on Hellinger Distance and Jensen-Shannon Distance. Lower is better.
         - Metrics: ${JSON.stringify(analysis.modelResults.map(m => ({ name: m.name, metrics: m.comparisonMetrics })), null, 2)}
       `;
   }
