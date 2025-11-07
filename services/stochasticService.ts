@@ -289,22 +289,20 @@ function analyzeSelfDependence(
         });
     }
 
-    // Generate conclusion based on the new test for Markovian property
+    // Generate conclusion based on a simple distance threshold for the Markovian property
     let conclusion: string;
-    if (numTimePoints < 4) {
-        conclusion = "The dataset has too few time points (less than 4) to perform a meaningful statistical test for the Markovian property using this method.";
-    } else if (orderResults.length > 0) {
+    if (orderResults.length > 0) {
         const markovResult = orderResults[0]; // order 1
-        const highOrderResult = orderResults[orderResults.length - 1]; // order n-2
-        const distanceDiff = Math.abs(markovResult.hellingerDistance - highOrderResult.hellingerDistance);
+        const hd = markovResult.hellingerDistance;
+        const jsd = markovResult.jensenShannonDistance;
 
-        if (distanceDiff < 0.05) { // Threshold for "not statistically different"
-            conclusion = `The process appears to be **Markovian (1st-order)**. The Hellinger Distance between the Markovian model's joint distribution and the empirical distribution is ${markovResult.hellingerDistance.toFixed(4)}, which is very close to the distance for a high-order (${highOrderResult.order}-order) model (${highOrderResult.hellingerDistance.toFixed(4)}). This suggests that memory beyond one step does not significantly alter the process's overall behavior.`;
+        if (hd >= 0 && hd <= 0.5 && jsd >= 0 && jsd <= 0.5) {
+            conclusion = `The process appears to be **Markovian (1st-order)**. The Hellinger Distance (${hd.toFixed(4)}) and Jensen-Shannon Distance (${jsd.toFixed(4)}) between the 1st-order model and the empirical data are both within the 0 to 0.5 range, suggesting the Markovian assumption is a reasonable fit. This means the future state of the process depends primarily on its current state, not its distant past.`;
         } else {
-            conclusion = `The process is likely **not Markovian**. It exhibits longer-term memory. The Hellinger Distance for the Markovian model (${markovResult.hellingerDistance.toFixed(4)}) is significantly different from that of a high-order (${highOrderResult.order}-order) model (${highOrderResult.hellingerDistance.toFixed(4)}), indicating that past states beyond the most recent one are important for predicting the future.`;
+            conclusion = `The Markovian assumption likely **does not hold**. At least one distance metric falls outside the 0 to 0.5 range (Hellinger: ${hd.toFixed(4)}, Jensen-Shannon: ${jsd.toFixed(4)}). This indicates that the process has longer-term memory, and past states beyond the most recent one are important for predicting the future.`;
         }
     } else {
-        conclusion = "The analysis could not determine a specific order of dependence. The process may be complex or data may be too sparse.";
+        conclusion = "The analysis could not be completed. This may be due to insufficient data or too few time points to test the Markovian assumption.";
     }
 
 
@@ -361,6 +359,7 @@ function analyzeTimeSeriesEnsemble(
     options: AnalysisOptions
 ): AnalysisResult {
     // FIX: Add explicit type for `row` to ensure `instanceData` is correctly typed as (string | number)[][] instead of unknown[][].
+    // FIX: Add explicit type for `row` to prevent `unknown` type inference.
     const instanceData = transpose(data.rows.map((row: (string | number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");

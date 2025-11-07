@@ -90,6 +90,7 @@ function App() {
 
     const uniqueStates: { [key: string]: Set<string | number> } = {};
     // FIX: Add explicit types to array method callbacks to prevent `unknown` type inference which can cause indexing errors.
+    // FIX: Add explicit types to callback parameters to prevent them from being inferred as 'unknown', which causes indexing errors.
     parsedData.headers.forEach((h: string) => {
       uniqueStates[h] = new Set();
     });
