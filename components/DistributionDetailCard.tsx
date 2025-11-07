@@ -1,45 +1,42 @@
-
 import React from 'react';
-import { Distribution } from '../types';
-import { MetricCard } from './MetricCard';
+import { Distribution, Moments } from '../types';
 
 interface DistributionDetailCardProps {
   title: string;
-  distribution?: Distribution;
+  distribution: Distribution;
   cmf?: Distribution;
-  moments?: { mean: number; variance: number };
+  moments?: Moments;
   isBest?: boolean;
 }
 
-const DistDisplay: React.FC<{ dist: Distribution; title: string; }> = ({ dist, title }) => {
-  const sortedEntries = Object.entries(dist).sort((a, b) => Number(a[0]) - Number(b[0]));
-  return (
-    <div>
-      <h4 className="font-semibold text-base text-gray-300 mb-2">{title}</h4>
-      <div className="bg-gray-900/50 p-3 rounded-md text-sm font-mono whitespace-pre-wrap max-h-40 overflow-y-auto border border-gray-700">
-        {sortedEntries
-            // FIX: Cast `value` to number to use `toFixed`, as it can be inferred as `unknown`.
-            .map(([key, value]) => `${key}: ${(value as number).toFixed(4)}`)
-            .join('\n')}
-      </div>
-    </div>
-  );
-};
+export const DistributionDetailCard: React.FC<DistributionDetailCardProps> = ({ title, distribution, moments, isBest }) => {
+  const sortedEntries = Object.entries(distribution).sort((a, b) => b[1] - a[1]);
 
-export const DistributionDetailCard: React.FC<DistributionDetailCardProps> = ({ title, distribution, cmf, moments, isBest }) => {
   return (
-    <div className={`bg-gray-800/50 p-4 rounded-lg shadow-md border ${isBest ? 'border-teal-500' : 'border-gray-700'} space-y-4`}>
-        <h3 className={`text-xl font-bold ${isBest ? 'text-teal-300' : 'text-gray-100'}`}>
-            {title} {isBest && '⭐'}
-        </h3>
-
-        <div className="grid grid-cols-2 gap-4">
-            {moments && <MetricCard title="Mean" value={moments.mean.toFixed(4)} description="The expected average value." />}
-            {moments && <MetricCard title="Variance" value={moments.variance.toFixed(4)} description="The spread of the distribution." />}
+    <div className={`bg-gray-800 p-4 rounded-lg border ${isBest ? 'border-teal-500 shadow-teal-500/20 shadow-lg' : 'border-gray-700'}`}>
+      <h4 className={`font-semibold text-lg ${isBest ? 'text-teal-300' : 'text-gray-300'} mb-2`}>{title} {isBest && '⭐'}</h4>
+      <div className="space-y-3">
+        <div>
+          <h5 className="text-xs font-bold text-gray-400 uppercase mb-1">Marginal Distribution</h5>
+          <div className="bg-gray-900/50 p-2 rounded-md text-sm font-mono max-h-40 overflow-y-auto">
+            {sortedEntries.map(([state, prob]) => (
+              <div key={state} className="flex justify-between items-center">
+                <span className="text-gray-400">{state}:</span>
+                <span className="font-bold text-gray-200">{prob.toFixed(4)}</span>
+              </div>
+            ))}
+          </div>
         </div>
-        
-        {distribution && <DistDisplay dist={distribution} title="Probability Mass Fn (PMF)" />}
-        {cmf && <DistDisplay dist={cmf} title="Cumulative Mass Fn (CMF)" />}
+        {moments && !isNaN(moments.mean) && (
+          <div>
+            <h5 className="text-xs font-bold text-gray-400 uppercase mb-1">Moments</h5>
+            <div className="bg-gray-900/50 p-2 rounded-md text-sm font-mono space-y-1">
+              <div className="flex justify-between"><span>Mean:</span><span>{moments.mean.toFixed(4)}</span></div>
+              <div className="flex justify-between"><span>Variance:</span><span>{moments.variance.toFixed(4)}</span></div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
