@@ -18,10 +18,17 @@ export const ModelBuilder: React.FC<ModelBuilderProps> = ({
 }) => {
 
   const handleVariableChange = (index: number, updatedVar: VariableInfo) => {
+    const oldVar = variables[index];
     const newVariables = [...variables];
     newVariables[index] = updatedVar;
     setVariables(newVariables);
-    setProbabilities({}); // Reset probabilities when structure changes
+
+    // Only reset probabilities if the state space definitions have changed,
+    // which alters the structure of the probability table. Changing the
+    // variable type alone should not clear user-entered probabilities.
+    if (oldVar.states !== updatedVar.states) {
+      setProbabilities({});
+    }
   };
 
   const hasValidDefinitions = variables.length > 0 && variables.every(v => v.name.trim() && v.states.trim());

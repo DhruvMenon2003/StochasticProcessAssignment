@@ -61,7 +61,9 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
   // This correctly handles cases where the state update is a function.
   const handleSetVariables = (vars: React.SetStateAction<VariableInfo[]>) => {
     const newVariables = typeof vars === 'function' ? vars(model.variables) : vars;
-    onUpdate(model.id, { variables: newVariables, probabilities: {} });
+    // Defer the decision to reset probabilities to the ModelBuilder component,
+    // which can check if the state space has actually changed.
+    onUpdate(model.id, { variables: newVariables });
   };
 
   const handleSetProbabilities = (probs: React.SetStateAction<Record<string, number>>) => {
