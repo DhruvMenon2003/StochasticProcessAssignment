@@ -2,18 +2,22 @@ import React, { useState, useRef, useEffect } from 'react';
 import { SaveIcon } from './icons/SaveIcon';
 import { TrashIcon } from './icons/TrashIcon';
 import { FolderOpenIcon } from './icons/FolderOpenIcon';
+import { UploadIcon } from './icons/UploadIcon';
+import { DownloadIcon } from './icons/DownloadIcon';
 
 interface SessionManagerProps {
   savedSessions: Record<string, any>;
   onSave: (name: string) => void;
   onLoad: (name: string) => void;
   onDelete: (name: string) => void;
+  onImport: (jsonData: string) => void;
 }
 
-export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, onSave, onLoad, onDelete }) => {
+export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, onSave, onLoad, onDelete, onImport }) => {
     const [isOpen, setIsOpen] = useState(false);
     const [newSessionName, setNewSessionName] = useState('');
     const dropdownRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const sessionKeys = Object.keys(savedSessions);
 
     useEffect(() => {
@@ -31,6 +35,42 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, o
         setNewSessionName('');
         setIsOpen(false);
     }
+
+    const handleExport = () => {
+        if (sessionKeys.length === 0) {
+            alert("No sessions to export.");
+            return;
+        }
+        const dataStr = JSON.stringify(savedSessions, null, 2);
+        const dataBlob = new Blob([dataStr], { type: 'application/json' });
+        const url = URL.createObjectURL(dataBlob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'stochastic_sessions.json';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        setIsOpen(false);
+    };
+
+    const handleImportChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const text = e.target?.result;
+                if (typeof text === 'string') {
+                    onImport(text);
+                }
+                if (fileInputRef.current) {
+                    fileInputRef.current.value = ''; // Reset input to allow re-importing the same file
+                }
+            };
+            reader.readAsText(file);
+            setIsOpen(false);
+        }
+    };
     
     return (
         <div className="relative" ref={dropdownRef}>
@@ -38,7 +78,7 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, o
                 onClick={() => setIsOpen(!isOpen)}
                 className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors flex items-center gap-1.5"
             >
-                <SaveIcon className="w-4 h-4" />
+                <FolderOpenIcon className="w-4 h-4" />
                 Sessions
             </button>
             {isOpen && (
@@ -50,18 +90,21 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, o
                                 type="text"
                                 value={newSessionName}
                                 onChange={(e) => setNewSessionName(e.target.value)}
+                                onKeyDown={(e) => e.key === 'Enter' && handleSaveClick()}
                                 placeholder="Enter session name..."
                                 className="w-full p-2 bg-gray-900 text-gray-300 border border-gray-600 rounded-md focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors text-sm"
                             />
                             <button 
                                 onClick={handleSaveClick}
-                                className="bg-blue-600 hover:bg-blue-700 text-white font-bold p-2 rounded-md transition-colors"
+                                disabled={!newSessionName.trim()}
+                                className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-bold p-2 rounded-md transition-colors"
                                 title="Save Session"
                             >
                                 <SaveIcon className="w-5 h-5" />
                             </button>
                         </div>
                     </div>
+                    
                     {sessionKeys.length > 0 && (
                         <>
                             <hr className="border-gray-600"/>
@@ -86,6 +129,27 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, o
                             </div>
                         </>
                     )}
+                    <div className="p-2 border-t border-gray-600 flex gap-2 bg-gray-800 rounded-b-lg">
+                        <input
+                            type="file"
+                            ref={fileInputRef}
+                            onChange={handleImportChange}
+                            accept=".json,application/json"
+                            className="hidden"
+                            id="import-sessions-input"
+                        />
+                        <label htmlFor="import-sessions-input" className="cursor-pointer text-xs w-full bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors flex items-center justify-center gap-1.5">
+                            <UploadIcon className="w-4 h-4" />
+                            Import
+                        </label>
+                        <button
+                            onClick={handleExport}
+                            className="text-xs w-full bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors flex items-center justify-center gap-1.5"
+                        >
+                            <DownloadIcon className="w-4 h-4" />
+                            Export
+                        </button>
+                    </div>
                 </div>
             )}
         </div>

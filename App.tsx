@@ -194,6 +194,28 @@ function App() {
     });
   }, []);
 
+  const handleImportSessions = useCallback((jsonData: string) => {
+    try {
+      const importedSessions = JSON.parse(jsonData);
+      if (typeof importedSessions !== 'object' || importedSessions === null || Array.isArray(importedSessions)) {
+        throw new Error("Invalid session file. Must be a JSON object of sessions.");
+      }
+       // Basic validation: check if at least one value looks like a session object
+      const firstKey = Object.keys(importedSessions)[0];
+      if (firstKey && typeof importedSessions[firstKey].csvString === 'undefined') {
+         throw new Error("JSON structure does not match session format.");
+      }
+
+      const newSavedSessions = { ...savedSessions, ...importedSessions };
+      setSavedSessions(newSavedSessions);
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(newSavedSessions));
+      alert(`Successfully imported and merged ${Object.keys(importedSessions).length} session(s).`);
+    } catch (e: any) {
+      alert(`Import failed: ${e.message}`);
+      console.error("Failed to import sessions:", e);
+    }
+  }, [savedSessions]);
+
 
   const handleClearAndReset = () => {
     if (window.confirm("Are you sure you want to clear all data, saved sessions, and reset to the default example? This action cannot be undone.")) {
@@ -236,6 +258,7 @@ function App() {
                   onSave={handleSaveSession}
                   onLoad={handleLoadSession}
                   onDelete={handleDeleteSession}
+                  onImport={handleImportSessions}
                 />
                 <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors">Load Ensemble Example</button>
                 <button 

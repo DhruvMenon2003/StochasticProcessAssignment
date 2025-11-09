@@ -463,7 +463,7 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: The result of transpose is explicitly cast to the correct type to resolve an inference issue.
+    // FIX: The result of transpose() can be inferred as unknown[][]. Cast the result to the correct type.
     const instanceData = transpose(data.rows.map(row => row.slice(1))) as (string | number)[][];
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
@@ -555,6 +555,38 @@ export function analyzeStochasticProcess(
     .map(m => {
         const distributions = analyzeModel(m);
         const rawMetrics = compareDistributions(empirical.joint, distributions.joint);
+
+        // --- Overwrite MSE with user-specified formula for numerical variables ---
+        // This new MSE measures the mean squared difference between each data point
+        // and the mean predicted by the theoretical model. It is averaged across all numerical variables.
+        const numericalVars = variableInfo.filter(v => v.type === 'numerical');
+        if (numericalVars.length > 0) {
+            let totalMse = 0;
+            let varsCounted = 0;
+
+            numericalVars.forEach(vInfo => {
+                const varIndex = data.headers.indexOf(vInfo.name);
+                const modelMean = distributions.moments?.[vInfo.name]?.mean;
+
+                if (varIndex !== -1 && modelMean !== null && typeof modelMean !== 'undefined') {
+                    const variableData = transposedData[varIndex].filter(val => typeof val === 'number' && isFinite(val as number)) as number[];
+                    const n = variableData.length;
+                    if (n > 0) {
+                        const squaredErrors = variableData.map(val => Math.pow(val - modelMean, 2));
+                        const varMse = squaredErrors.reduce((a, b) => a + b, 0) / n;
+                        totalMse += varMse;
+                        varsCounted++;
+                    }
+                }
+            });
+
+            if (varsCounted > 0) {
+                rawMetrics['Mean Squared Error'] = totalMse / varsCounted;
+            }
+            // If varsCounted is 0 (e.g., model didn't produce a mean), we keep the old MSE.
+        }
+        // If no numerical variables exist, the original MSE from compareDistributions is used by default.
+
         const comparisonMetrics: { [metricName: string]: ComparisonMetric } = {};
         Object.keys(rawMetrics).forEach(key => {
             comparisonMetrics[key] = { value: rawMetrics[key] };
