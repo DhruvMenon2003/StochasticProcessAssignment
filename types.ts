@@ -6,7 +6,7 @@ export interface CsvData {
 export interface VariableInfo {
   name: string;
   states: string;
-  type: 'numerical' | 'categorical';
+  type: 'numerical' | 'nominal' | 'ordinal';
 }
 
 export interface Distribution {

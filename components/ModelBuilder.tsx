@@ -1,6 +1,6 @@
 import React from 'react';
 import { VariableInfo } from '../types';
-import { VariableInfoInput } from './VariableInfoInput';
+import { VariableInfoInput } from './VariableDefInput';
 import { ProbabilityTable } from './ProbabilityTable';
 
 interface ModelBuilderProps {

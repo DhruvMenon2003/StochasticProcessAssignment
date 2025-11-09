@@ -38,9 +38,9 @@ export function analyzeCsvStructure(data: CsvData): VariableInfo[] {
       const value = row[index];
       if (value !== undefined && value !== '') {
         uniqueStates[h].add(value);
-        // If we find a non-numeric value that is not an empty string, it's categorical
+        // If we find a non-numeric value that is not an empty string, it's categorical (nominal)
         if (typeof value === 'string' && isNaN(Number(value))) {
-            infos[index].type = 'categorical';
+            infos[index].type = 'nominal';
         }
       }
     });
@@ -49,7 +49,6 @@ export function analyzeCsvStructure(data: CsvData): VariableInfo[] {
   return infos.map(info => ({
     ...info,
     states: Array.from(uniqueStates[info.name]).sort().join(', '),
-    type: info.type as 'numerical' | 'categorical',
   }));
 }
 

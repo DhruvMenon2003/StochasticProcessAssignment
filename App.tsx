@@ -58,7 +58,8 @@ function App() {
         return [{
             name: "State",
             states: statesArray.join(', '),
-            type: isNumeric ? 'numerical' : 'categorical',
+            // FIX: The type 'categorical' is not valid for VariableInfo. It should be 'nominal' for non-numeric categorical data.
+            type: isNumeric ? 'numerical' : 'nominal',
         }];
     }
     return analyzeCsvStructure(parsedData);
