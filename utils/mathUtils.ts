@@ -35,7 +35,7 @@ export function transpose<T>(matrix: T[][]): T[][] {
  * D_KL(P || Q)
  * @param dist1 The first distribution (P).
  * @param dist2 The second distribution (Q).
- * @returns The KL divergence value.
+ * @returns The KL divergence value in bits.
  */
 export function klDivergence(dist1: Distribution, dist2: Distribution): number {
   const allKeys = Array.from(new Set([...Object.keys(dist1), ...Object.keys(dist2)]));
@@ -49,22 +49,21 @@ export function klDivergence(dist1: Distribution, dist2: Distribution): number {
       if (p2 === 0) {
         return Infinity; // p1 > 0 and p2 = 0 results in infinite divergence
       }
-      divergence += p1 * Math.log(p1 / p2);
+      divergence += p1 * Math.log2(p1 / p2);
     }
   }
 
   return divergence;
 }
 
-
 /**
- * Calculates the square root of the Jensen-Shannon Divergence, which is a true metric.
- * It is symmetric and bounded.
- * @param dist1 The first distribution.
- * @param dist2 The second distribution.
- * @returns The Jensen-Shannon Distance.
+ * Calculates the Jensen-Shannon Divergence between two distributions.
+ * It is symmetric and bounded. JS(P || Q) = 0.5 * KL(P || M) + 0.5 * KL(Q || M)
+ * @param dist1 The first distribution (P).
+ * @param dist2 The second distribution (Q).
+ * @returns The Jensen-Shannon Divergence in bits.
  */
-export function jensenShannonDistance(dist1: Distribution, dist2: Distribution): number {
+export function jensenShannonDivergence(dist1: Distribution, dist2: Distribution): number {
   const allKeys = Array.from(new Set([...Object.keys(dist1), ...Object.keys(dist2)]));
   const m: Distribution = {};
 
@@ -77,11 +76,22 @@ export function jensenShannonDistance(dist1: Distribution, dist2: Distribution):
 
   const kl1 = klDivergence(dist1, m);
   const kl2 = klDivergence(dist2, m);
-
+  
   // kl1 and kl2 will not be Infinity because if dist1[key] > 0, then m[key] must be > 0.
-  
   const jsd = 0.5 * kl1 + 0.5 * kl2;
-  
+  return jsd;
+}
+
+
+/**
+ * Calculates the square root of the Jensen-Shannon Divergence, which is a true metric.
+ * It is symmetric and bounded.
+ * @param dist1 The first distribution.
+ * @param dist2 The second distribution.
+ * @returns The Jensen-Shannon Distance.
+ */
+export function jensenShannonDistance(dist1: Distribution, dist2: Distribution): number {
+  const jsd = jensenShannonDivergence(dist1, dist2);
   // The result is the square root of the JSD.
   return Math.sqrt(jsd);
 }

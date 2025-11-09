@@ -196,7 +196,15 @@ function App() {
 
   const handleImportSessions = useCallback((jsonData: string) => {
     try {
-      const importedSessions = JSON.parse(jsonData);
+      // Sanitize the input string to remove leading whitespace and potential
+      // Byte Order Mark (BOM) which can cause JSON.parse to fail.
+      const sanitizedJsonData = jsonData.trim().replace(/^\uFEFF/, '');
+      
+      if (!sanitizedJsonData) {
+          throw new Error("Imported session file is empty.");
+      }
+      
+      const importedSessions = JSON.parse(sanitizedJsonData);
       if (typeof importedSessions !== 'object' || importedSessions === null || Array.isArray(importedSessions)) {
         throw new Error("Invalid session file. Must be a JSON object of sessions.");
       }

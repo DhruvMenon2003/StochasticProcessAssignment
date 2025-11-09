@@ -21,7 +21,7 @@ import {
   VariableInfo,
   Moments,
 } from '../types';
-import { transpose, cartesianProduct, jensenShannonDistance, klDivergence } from '../utils/mathUtils';
+import { transpose, cartesianProduct, jensenShannonDistance, jensenShannonDivergence } from '../utils/mathUtils';
 
 // --- Helper Functions ---
 
@@ -276,7 +276,7 @@ function compareDistributions(dist1: Distribution, dist2: Distribution): { [metr
   return { 
     'Hellinger Distance': hellinger, 
     'Mean Squared Error': mse,
-    'KL Divergence': klDivergence(dist1, dist2)
+    'Jensen-Shannon Divergence': jensenShannonDivergence(dist1, dist2)
   };
 }
 
@@ -463,7 +463,8 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: The result of transpose() can be inferred as unknown[][]. Cast the result to the correct type.
+    // FIX: The `transpose` function can return `undefined` for non-rectangular matrices,
+    // causing TypeScript to infer `unknown[][]`. We cast it to the expected type.
     const instanceData = transpose(data.rows.map(row => row.slice(1))) as (string | number)[][];
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");

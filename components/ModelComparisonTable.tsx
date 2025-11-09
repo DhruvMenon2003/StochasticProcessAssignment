@@ -8,7 +8,7 @@ interface ModelComparisonTableProps {
 }
 
 // Define the order of metrics for display
-const metricOrder = ['Hellinger Distance', 'Mean Squared Error', 'KL Divergence'];
+const metricOrder = ['Hellinger Distance', 'Mean Squared Error', 'Jensen-Shannon Divergence'];
 
 export const ModelComparisonTable: React.FC<ModelComparisonTableProps> = ({ modelResults, bestModelName }) => {
     if (!modelResults || modelResults.length === 0) {
