@@ -38,7 +38,7 @@ export const SingleVariableDisplay: React.FC<SingleVariableDisplayProps> = ({ re
           <DistributionDetailCard 
             title="Empirical Data"
             distribution={results.empirical.marginals[variableName]}
-            cmf={results.empirical.cmf}
+            cmf={results.empirical.cmfs?.[variableName]}
             moments={results.empirical.moments ? results.empirical.moments[variableName] : undefined}
           />
           {results.modelResults?.map(modelResult => (
@@ -46,7 +46,7 @@ export const SingleVariableDisplay: React.FC<SingleVariableDisplayProps> = ({ re
               key={modelResult.name}
               title={`Model: ${modelResult.name}`}
               distribution={modelResult.distributions!.marginals[variableName]}
-              cmf={modelResult.distributions!.cmf}
+              cmf={modelResult.distributions!.cmfs?.[variableName]}
               moments={modelResult.distributions!.moments ? modelResult.distributions!.moments[variableName] : undefined}
               isBest={modelResult.name === results.bestModelName}
             />

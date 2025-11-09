@@ -49,7 +49,7 @@ export interface Moments {
 export interface DistributionAnalysis {
   marginals: { [variable: string]: Distribution };
   joint: Distribution;
-  cmf: Distribution; // Cumulative Mass Function, for single variable case
+  cmfs?: { [variable: string]: Distribution }; // Cumulative Mass Function
   moments?: { [variable: string]: Moments };
 }
 

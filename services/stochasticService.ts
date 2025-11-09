@@ -83,6 +83,36 @@ function getMoments(dist: Distribution): Moments {
     return { mean, variance };
 }
 
+function calculateCmf(pmf: Distribution, variable: VariableInfo): Distribution {
+    if (variable.type === 'nominal' || Object.keys(pmf).length === 0) {
+        return {};
+    }
+
+    let sortedStates: (string|number)[];
+    
+    if (variable.type === 'numerical') {
+        sortedStates = Object.keys(pmf).map(Number).sort((a, b) => a - b);
+    } else { // ordinal
+        // FIX: Use a temporary variable to hold string states before converting to numbers
+        // to avoid TypeScript inferring `s` as `string | number` in the subsequent map.
+        const stringStates = variable.states.split(',').map(s => s.trim()).filter(Boolean);
+        // Also convert to number if possible to match pmf keys
+        sortedStates = stringStates.map(s => !isNaN(Number(s)) && s.trim() !== '' ? Number(s) : s);
+    }
+    
+    const cmf: Distribution = {};
+    let cumulativeProb = 0;
+    
+    for (const state of sortedStates) {
+        const stateKey = String(state);
+        const prob = pmf[stateKey] || 0;
+        cumulativeProb += prob;
+        cmf[stateKey] = cumulativeProb;
+    }
+
+    return cmf;
+}
+
 function calculateTransitionMatrix(trace: (string|number)[]): {matrix: number[][], states: (string|number)[]} {
     const states = Array.from(new Set(trace)).sort();
     const stateIndex = new Map(states.map((s, i) => [s, i]));
@@ -127,16 +157,22 @@ function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode, variableInfo: V
   });
 
   const moments: { [key: string]: Moments } = {};
+  const cmfs: { [key: string]: Distribution } = {};
+
   variableInfo.forEach(v => {
+      const marginal = marginals[v.name];
       if (v.type === 'numerical') {
-        moments[v.name] = getMoments(marginals[v.name]);
+        moments[v.name] = getMoments(marginal);
+      }
+      if ((v.type === 'numerical' || v.type === 'ordinal') && marginal) {
+        cmfs[v.name] = calculateCmf(marginal, v);
       }
   });
   
   return {
     marginals,
     joint: jointDist,
-    cmf: {}, // Simplified
+    cmfs,
     moments,
   };
 }
@@ -155,13 +191,19 @@ function analyzeModel(modelDef: ModelDef): DistributionAnalysis {
   });
   
   const moments: { [key: string]: Moments } = {};
+  const cmfs: { [key: string]: Distribution } = {};
+
   modelDef.variables.forEach(v => {
+      const marginal = marginals[v.name];
       if (v.type === 'numerical') {
-        moments[v.name] = getMoments(marginals[v.name]);
+        moments[v.name] = getMoments(marginal);
+      }
+      if ((v.type === 'numerical' || v.type === 'ordinal') && marginal) {
+        cmfs[v.name] = calculateCmf(marginal, v);
       }
   });
 
-  return { marginals, joint: jointDist, cmf: {}, moments };
+  return { marginals, joint: jointDist, cmfs, moments };
 }
 
 function compareDistributions(dist1: Distribution, dist2: Distribution): { [metric: string]: number } {
@@ -369,8 +411,7 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: TypeScript's type inference for the generic `transpose` function was failing. Explicitly providing the
-    // generic type argument solves the issue of `transpose` returning `unknown[][]`.
+    // FIX: Explicitly providing the generic type argument to `transpose` solves the issue of it returning `unknown[][]`.
     const instanceData = transpose<(string | number)>(data.rows.map((row: (string | number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
@@ -401,7 +442,7 @@ function analyzeTimeSeriesEnsemble(
     );
 
     // Dummy empirical analysis for consistency
-    const empirical: DistributionAnalysis = { marginals: {}, joint: {}, cmf: {}, moments: {} };
+    const empirical: DistributionAnalysis = { marginals: {}, joint: {}, cmfs: {}, moments: {} };
     
     // Compare models
     const modelResults: ModelAnalysisResult[] = models.map(model => {
