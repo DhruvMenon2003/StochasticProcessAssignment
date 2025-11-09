@@ -7,6 +7,7 @@ import { analyzeStochasticProcess } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
 import { CsvData, VariableInfo, ModelDef, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
 import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
+import { TrashIcon } from './components/icons/TrashIcon';
 
 const exampleData = `VarX,VarY
 A,1
@@ -35,6 +36,50 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+
+  // Effect to load data from localStorage on initial render
+  useEffect(() => {
+    const savedStateJSON = localStorage.getItem('stochasticAppAutosave');
+    if (savedStateJSON) {
+      try {
+        const savedState = JSON.parse(savedStateJSON);
+        if (savedState.csvString) setCsvString(savedState.csvString);
+        if (savedState.models) setModels(savedState.models);
+        if (savedState.transitionMatrixModels) setTransitionMatrixModels(savedState.transitionMatrixModels);
+      } catch (e) {
+        console.error("Failed to parse saved state from localStorage:", e);
+        localStorage.removeItem('stochasticAppAutosave');
+      }
+    }
+  }, []);
+
+  // Effect to auto-save data to localStorage with debouncing
+  useEffect(() => {
+    setSaveStatus('saving');
+    const handler = setTimeout(() => {
+      try {
+        const stateToSave = {
+          csvString,
+          models,
+          transitionMatrixModels,
+        };
+        localStorage.setItem('stochasticAppAutosave', JSON.stringify(stateToSave));
+        setSaveStatus('saved');
+        
+        const resetHandler = setTimeout(() => setSaveStatus('idle'), 2000);
+        return () => clearTimeout(resetHandler);
+
+      } catch (e) {
+        console.error("Failed to save state to localStorage:", e);
+        setSaveStatus('idle');
+      }
+    }, 1000); // Debounce for 1 second
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [csvString, models, transitionMatrixModels]);
 
   const parsedData = useMemo<CsvData>(() => {
     try {
@@ -51,14 +96,12 @@ function App() {
   const variableInfo = useMemo<VariableInfo[]>(() => {
     if (isEnsemble) {
         if (parsedData.rows.length === 0) return [];
-        // Add explicit type for `row` to prevent `unknown` type inference.
         const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
         const statesArray = Array.from(allStates).sort();
         const isNumeric = statesArray.every(s => typeof s === 'number');
         return [{
             name: "State",
             states: statesArray.join(', '),
-            // FIX: The type 'categorical' is not valid for VariableInfo. It should be 'nominal' for non-numeric categorical data.
             type: isNumeric ? 'numerical' : 'nominal',
         }];
     }
@@ -97,6 +140,19 @@ function App() {
     }
   }, [parsedData, models, transitionMatrixModels, analysisMode, variableInfo]);
 
+  const handleClearAndReset = () => {
+    if (window.confirm("Are you sure you want to clear all data and reset to the default example? This action cannot be undone.")) {
+      localStorage.removeItem('stochasticAppAutosave');
+      setCsvString(exampleData);
+      setModels([]);
+      setTransitionMatrixModels([]);
+      setAnalysisResult(null);
+      setExplanation(null);
+      setError(null);
+      setSaveStatus('idle');
+    }
+  };
+
   const modeDisplayNames: Record<AnalysisMode, string> = {
     joint: "Cross-Sectional",
     timeSeries: "Time Series (Single Trace)",
@@ -117,7 +173,17 @@ function App() {
             <h1 className="text-2xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">
               Stochastic Process Analyzer
             </h1>
-             <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 p-1 rounded">Load Ensemble Example</button>
+             <div className="flex items-center gap-4">
+                <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors">Load Ensemble Example</button>
+                <button 
+                    onClick={handleClearAndReset} 
+                    className="text-xs flex items-center gap-1.5 bg-red-800/50 hover:bg-red-700/50 p-2 rounded text-red-300 transition-colors" 
+                    title="Clear saved data and reset"
+                >
+                    <TrashIcon className="h-4 w-4" />
+                    Clear & Reset
+                </button>
+            </div>
           </div>
         </div>
       </header>
@@ -157,6 +223,10 @@ function App() {
                     >
                       {isLoading ? 'Analyzing...' : 'Analyze'}
                     </button>
+                     <div className="text-center text-sm h-5 text-gray-500 transition-opacity duration-500">
+                        {saveStatus === 'saving' && <span>Saving...</span>}
+                        {saveStatus === 'saved' && <span className="text-green-400">✓ Saved</span>}
+                    </div>
                 </div>
               </div>
             </div>
