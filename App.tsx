@@ -186,12 +186,13 @@ function App() {
   }, [savedSessions]);
 
   const handleDeleteSession = useCallback((name: string) => {
-    if (window.confirm(`Are you sure you want to delete session "${name}"? This action cannot be undone.`)) {
-      const { [name]: _, ...rest } = savedSessions;
-      setSavedSessions(rest);
-      localStorage.setItem(SESSIONS_KEY, JSON.stringify(rest));
-    }
-  }, [savedSessions]);
+    setSavedSessions(currentSessions => {
+      const newSavedSessions = { ...currentSessions };
+      delete newSavedSessions[name];
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(newSavedSessions));
+      return newSavedSessions;
+    });
+  }, []);
 
 
   const handleClearAndReset = () => {

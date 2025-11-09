@@ -73,7 +73,12 @@ export const SessionManager: React.FC<SessionManagerProps> = ({ savedSessions, o
                                             <span className="text-sm text-gray-300 truncate" title={name}>{name}</span>
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => { onLoad(name); setIsOpen(false); }} title="Load Session" className="p-1 text-gray-400 hover:text-green-400"><FolderOpenIcon className="w-5 h-5"/></button>
-                                                <button onClick={() => onDelete(name)} title="Delete Session" className="p-1 text-gray-400 hover:text-red-400"><TrashIcon className="w-5 h-5" /></button>
+                                                <button 
+                                                    onClick={() => onDelete(name)} 
+                                                    title="Delete Session" 
+                                                    className="p-1 text-gray-400 hover:text-red-400">
+                                                    <TrashIcon className="w-5 h-5" />
+                                                </button>
                                             </div>
                                         </li>
                                     ))}

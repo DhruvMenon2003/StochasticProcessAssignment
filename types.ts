@@ -42,8 +42,10 @@ export interface TransitionMatrixModelDef {
 export type AnalysisMode = 'joint' | 'timeSeries' | 'timeSeriesEnsemble';
 
 export interface Moments {
-  mean: number;
-  variance: number;
+  mean: number | null;
+  variance: number | null;
+  median: string | number | null;
+  mode: (string | number)[] | null;
 }
 
 export interface DistributionAnalysis {

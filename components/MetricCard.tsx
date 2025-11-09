@@ -9,10 +9,14 @@ interface MetricCardProps {
 }
 
 export const MetricCard: React.FC<MetricCardProps> = ({ title, value, description }) => {
+  const valueStr = String(value);
+  // Adjust font size based on the length of the displayed value for better UI
+  const valueFontSize = valueStr.length > 8 ? 'text-2xl' : 'text-4xl';
+
   return (
     <div className="bg-gray-800 p-6 rounded-lg border border-gray-700 shadow-lg relative group">
       <h3 className="text-lg font-semibold text-gray-400">{title}</h3>
-      <p className="text-4xl font-bold text-teal-300 my-2">{value}</p>
+      <p className={`${valueFontSize} font-bold text-teal-300 my-2 break-words`}>{valueStr}</p>
       <div className="absolute top-4 right-4 text-gray-500">
         <InfoIcon className="h-5 w-5" />
       </div>

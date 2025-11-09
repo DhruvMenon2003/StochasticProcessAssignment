@@ -1,13 +1,13 @@
 
 import React from 'react';
-import { Distribution } from '../types';
+import { Distribution, Moments } from '../types';
 import { MetricCard } from './MetricCard';
 
 interface DistributionDetailCardProps {
   title: string;
   distribution?: Distribution;
   cmf?: Distribution;
-  moments?: { mean: number; variance: number };
+  moments?: Moments;
   isBest?: boolean;
 }
 
@@ -48,6 +48,8 @@ const DistDisplay: React.FC<{ dist: Distribution; title: string; }> = ({ dist, t
 };
 
 export const DistributionDetailCard: React.FC<DistributionDetailCardProps> = ({ title, distribution, cmf, moments, isBest }) => {
+  const modeString = moments?.mode ? moments.mode.join(', ') : 'N/A';
+  
   return (
     <div className={`bg-gray-800/50 p-4 rounded-lg shadow-md border ${isBest ? 'border-teal-500' : 'border-gray-700'} space-y-4`}>
         <h3 className={`text-xl font-bold ${isBest ? 'text-teal-300' : 'text-gray-100'}`}>
@@ -55,8 +57,10 @@ export const DistributionDetailCard: React.FC<DistributionDetailCardProps> = ({ 
         </h3>
 
         <div className="grid grid-cols-2 gap-4">
-            {moments && <MetricCard title="Mean" value={moments.mean.toFixed(4)} description="The expected average value." />}
-            {moments && <MetricCard title="Variance" value={moments.variance.toFixed(4)} description="The spread of the distribution." />}
+            {moments?.mode !== null && typeof moments?.mode !== 'undefined' && <MetricCard title="Mode" value={modeString} description="The most frequently occurring value(s)." />}
+            {moments?.median !== null && typeof moments?.median !== 'undefined' && <MetricCard title="Median" value={String(moments.median)} description="The middle value of the dataset." />}
+            {moments?.mean !== null && typeof moments?.mean !== 'undefined' && !isNaN(moments.mean) && <MetricCard title="Mean" value={moments.mean.toFixed(4)} description="The expected average value." />}
+            {moments?.variance !== null && typeof moments?.variance !== 'undefined' && !isNaN(moments.variance) && <MetricCard title="Variance" value={moments.variance.toFixed(4)} description="The spread of the distribution." />}
         </div>
         
         {distribution && <DistDisplay dist={distribution} title="Probability Mass Fn (PMF)" />}
