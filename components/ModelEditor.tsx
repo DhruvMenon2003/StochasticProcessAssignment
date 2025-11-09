@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-// Fix: Import VariableDef to be used in handler function types.
-import { ModelDef, ProbabilityModel, VariableDef } from '../types';
+// Fix: Import VariableInfo to be used in handler function types.
+import { ModelDef, ProbabilityModel, VariableInfo } from '../types';
 import { ModelBuilder } from './ModelBuilder';
 import { TrashIcon } from './icons/TrashIcon';
 import { cartesianProduct } from '../utils/mathUtils';
@@ -40,7 +40,7 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
       model.variables.forEach((v, i) => {
         const stateValue = combo[i];
         // FIX: Use String(stateValue) to handle `unknown` type. `stateValue` alone is not assignable to `string | number`.
-        states[v.name] = isNaN(Number(stateValue)) ? String(stateValue) : Number(stateValue);
+        states[v.name] = v.type === 'numerical' && !isNaN(Number(stateValue)) ? Number(stateValue) : String(stateValue);
       });
       return { states, probability };
     });
@@ -59,7 +59,7 @@ export const ModelEditor: React.FC<ModelEditorProps> = ({ model, onUpdate, onDel
 
   // Fix: Create handlers to resolve the SetStateAction before calling onUpdate.
   // This correctly handles cases where the state update is a function.
-  const handleSetVariables = (vars: React.SetStateAction<VariableDef[]>) => {
+  const handleSetVariables = (vars: React.SetStateAction<VariableInfo[]>) => {
     const newVariables = typeof vars === 'function' ? vars(model.variables) : vars;
     onUpdate(model.id, { variables: newVariables, probabilities: {} });
   };

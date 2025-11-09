@@ -1,7 +1,7 @@
 import React from 'react';
 // Fix: Correct import path for AnalysisResult. It's defined in types.ts.
 import { AnalysisResult } from '../types';
-import { SingleVariableComparisonTable } from './SingleVariableComparisonTable';
+import { ModelComparisonTable } from './ModelComparisonTable';
 import { DistributionDetailCard } from './DistributionDetailCard';
 
 interface SingleVariableDisplayProps {
@@ -28,7 +28,7 @@ export const SingleVariableDisplay: React.FC<SingleVariableDisplayProps> = ({ re
       {results.modelResults && results.modelResults.length > 0 && (
         <div>
           <h3 className="text-2xl font-bold text-gray-100 mb-4">Model Fit Comparison</h3>
-          <SingleVariableComparisonTable modelResults={results.modelResults} bestModelName={results.bestModelName} />
+          <ModelComparisonTable modelResults={results.modelResults} bestModelName={results.bestModelName} />
         </div>
       )}
 

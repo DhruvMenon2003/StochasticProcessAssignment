@@ -1,13 +1,11 @@
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
-import { AnalysisOptions } from './components/AnalysisOptions';
 import { ResultsDisplay } from './components/ResultsDisplay';
-import { parseCsvData, detectAnalysisMode } from './utils/csvParser';
+import { parseCsvData, detectAnalysisMode, analyzeCsvStructure } from './utils/csvParser';
 import { analyzeStochasticProcess } from './services/stochasticService';
 import { getAnalysisExplanation } from './services/geminiService';
-import { CsvData, VariableDef, ModelDef, AnalysisOptions as AnalysisOptionsType, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
+import { CsvData, VariableInfo, ModelDef, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
 import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
 
 const exampleData = `VarX,VarY
@@ -33,11 +31,6 @@ function App() {
   const [models, setModels] = useState<ModelDef[]>([]);
   const [transitionMatrixModels, setTransitionMatrixModels] = useState<TransitionMatrixModelDef[]>([]);
 
-  const [options, setOptions] = useState<AnalysisOptionsType>({
-    runMarkovOrderTest: false,
-    runTimeHomogeneityTest: false,
-  });
-
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -55,60 +48,27 @@ function App() {
   const analysisMode = useMemo(() => detectAnalysisMode(parsedData), [parsedData]);
   const isEnsemble = analysisMode === 'timeSeriesEnsemble';
 
-  // Auto-switch options based on data format
-  useEffect(() => {
-    const isTimeSeries = analysisMode === 'timeSeries' || isEnsemble;
-    if (isTimeSeries) {
-      setOptions({ runMarkovOrderTest: true, runTimeHomogeneityTest: true });
-    } else {
-      setOptions({ runMarkovOrderTest: false, runTimeHomogeneityTest: false });
-    }
-  }, [analysisMode, isEnsemble]);
-
-
-  const templateVariables = useMemo<VariableDef[]>(() => {
-    if (parsedData.headers.length === 0) return [];
-    
-    // For ensemble, the variable is implicit, not based on headers
-    if(isEnsemble) {
+  const variableInfo = useMemo<VariableInfo[]>(() => {
+    if (isEnsemble) {
+        if (parsedData.rows.length === 0) return [];
         // Add explicit type for `row` to prevent `unknown` type inference.
         const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
+        const statesArray = Array.from(allStates).sort();
+        const isNumeric = statesArray.every(s => typeof s === 'number');
         return [{
             name: "State",
-            states: Array.from(allStates).sort().join(', '),
+            states: statesArray.join(', '),
+            type: isNumeric ? 'numerical' : 'categorical',
         }];
     }
-
-    const uniqueStates: { [key: string]: Set<string | number> } = {};
-    // FIX: Add explicit types to callback parameters to prevent them from being inferred as 'unknown', which causes indexing errors.
-    parsedData.headers.forEach((h: string) => {
-      uniqueStates[h] = new Set();
-    });
-
-    const headerIndexMap = new Map(parsedData.headers.map((h: string, i: number) => [h, i]));
-
-    parsedData.rows.forEach((row: (string | number)[]) => {
-      // FIX: Add explicit types to `forEach` callback parameters to prevent them from being inferred as `unknown` and causing "Type 'unknown' cannot be used as an index type" errors.
-      parsedData.headers.forEach((h: string) => {
-        const index = headerIndexMap.get(h);
-        if (index !== undefined && row[index] !== undefined && row[index] !== '') {
-          uniqueStates[h].add(row[index]);
-        }
-      });
-    });
-
-    return parsedData.headers.map((h: string) => ({
-      name: h,
-      states: Array.from(uniqueStates[h]).sort().join(', '),
-    }));
-
+    return analyzeCsvStructure(parsedData);
   }, [parsedData, isEnsemble]);
   
   // Reset models if headers/data format change
   useEffect(() => {
      setModels([]);
      setTransitionMatrixModels([]);
-  }, [templateVariables.map(v => v.name).join(','), isEnsemble]);
+  }, [variableInfo.map(v => v.name).join(','), isEnsemble]);
 
 
   const handleAnalyze = useCallback(async () => {
@@ -122,7 +82,7 @@ function App() {
         throw new Error("No data provided to analyze.");
       }
       
-      const results = analyzeStochasticProcess(parsedData, models, transitionMatrixModels, analysisMode, options);
+      const results = analyzeStochasticProcess(parsedData, models, transitionMatrixModels, analysisMode, variableInfo);
       setAnalysisResult(results);
       
       const geminiExplanation = await getAnalysisExplanation(results);
@@ -134,7 +94,7 @@ function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [parsedData, models, transitionMatrixModels, analysisMode, options]);
+  }, [parsedData, models, transitionMatrixModels, analysisMode, variableInfo]);
 
   const modeDisplayNames: Record<AnalysisMode, string> = {
     joint: "Cross-Sectional",
@@ -168,17 +128,11 @@ function App() {
                 <TransitionMatrixModelsManager
                     models={transitionMatrixModels}
                     setModels={setTransitionMatrixModels}
-                    states={templateVariables.length > 0 ? templateVariables[0].states.split(',').map(s=>s.trim()).filter(Boolean) : []}
+                    states={variableInfo.length > 0 ? variableInfo[0].states.split(',').map(s=>s.trim()).filter(Boolean) : []}
                 />
             ) : (
-                <ModelsManager models={models} setModels={setModels} templateVariables={templateVariables} />
+                <ModelsManager models={models} setModels={setModels} variableInfo={variableInfo} />
             )}
-            
-            <AnalysisOptions 
-                options={options} 
-                setOptions={setOptions} 
-                disabled={analysisMode === 'timeSeries' || isEnsemble}
-            />
           </div>
           <div className="lg:col-span-1">
             <div className="sticky top-20">

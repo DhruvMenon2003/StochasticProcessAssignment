@@ -1,10 +1,10 @@
 
 import React from 'react';
-import { VariableDef } from '../types';
+import { VariableInfo } from '../types';
 import { cartesianProduct } from '../utils/mathUtils';
 
 interface ProbabilityTableProps {
-  variables: VariableDef[];
+  variables: VariableInfo[];
   probabilities: Record<string, number>;
   setProbabilities: React.Dispatch<React.SetStateAction<Record<string, number>>>;
 }

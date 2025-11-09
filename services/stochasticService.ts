@@ -1,7 +1,5 @@
-
 import {
   AnalysisMode,
-  AnalysisOptions,
   AnalysisResult,
   ComparisonMetric,
   ConditionalDistributionTable,
@@ -20,8 +18,10 @@ import {
   OrderResult,
   TimeBasedConditionalDistributionSet,
   TimeBasedConditionalDistributionTable,
+  VariableInfo,
+  Moments,
 } from '../types';
-import { transpose, cartesianProduct, jensenShannonDistance } from '../utils/mathUtils';
+import { transpose, cartesianProduct, jensenShannonDistance, klDivergence } from '../utils/mathUtils';
 
 // --- Helper Functions ---
 
@@ -62,7 +62,7 @@ function getMarginal(jointDist: Distribution, headers: string[], varIndex: numbe
   return marginal;
 }
 
-function getMoments(dist: Distribution): { mean: number; variance: number } {
+function getMoments(dist: Distribution): Moments {
     let mean = 0;
     let variance = 0;
     const entries = Object.entries(dist).map(([state, prob]) => ({
@@ -111,7 +111,7 @@ function calculateTransitionMatrix(trace: (string|number)[]): {matrix: number[][
 
 // --- Analysis Functions ---
 
-function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode): DistributionAnalysis {
+function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode, variableInfo: VariableInfo[]): DistributionAnalysis {
   const { headers, rows } = data;
   const transposedData = transpose(rows);
   
@@ -126,9 +126,11 @@ function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode): DistributionAn
     }
   });
 
-  const moments: { [key: string]: { mean: number, variance: number } } = {};
-  headers.forEach(h => {
-      moments[h] = getMoments(marginals[h]);
+  const moments: { [key: string]: Moments } = {};
+  variableInfo.forEach(v => {
+      if (v.type === 'numerical') {
+        moments[v.name] = getMoments(marginals[v.name]);
+      }
   });
   
   return {
@@ -152,9 +154,11 @@ function analyzeModel(modelDef: ModelDef): DistributionAnalysis {
     marginals[v.name] = getMarginal(jointDist, modelDef.variables.map(v => v.name), i);
   });
   
-  const moments: { [key: string]: { mean: number, variance: number } } = {};
+  const moments: { [key: string]: Moments } = {};
   modelDef.variables.forEach(v => {
-      moments[v.name] = getMoments(marginals[v.name]);
+      if (v.type === 'numerical') {
+        moments[v.name] = getMoments(marginals[v.name]);
+      }
   });
 
   return { marginals, joint: jointDist, cmf: {}, moments };
@@ -163,16 +167,23 @@ function analyzeModel(modelDef: ModelDef): DistributionAnalysis {
 function compareDistributions(dist1: Distribution, dist2: Distribution): { [metric: string]: number } {
   const allKeys = Array.from(new Set([...Object.keys(dist1), ...Object.keys(dist2)]));
   let hellinger = 0;
+  let mse = 0;
   
   allKeys.forEach(key => {
     const p1 = dist1[key] || 0;
     const p2 = dist2[key] || 0;
     hellinger += Math.pow(Math.sqrt(p1) - Math.sqrt(p2), 2);
+    mse += Math.pow(p1 - p2, 2);
   });
 
   hellinger = (1 / Math.sqrt(2)) * Math.sqrt(hellinger);
+  mse = mse / allKeys.length;
 
-  return { 'Hellinger Distance': hellinger, 'Jensen-Shannon Distance': jensenShannonDistance(dist1, dist2) };
+  return { 
+    'Hellinger Distance': hellinger, 
+    'Mean Squared Error': mse,
+    'KL Divergence': klDivergence(dist1, dist2)
+  };
 }
 
 
@@ -285,7 +296,7 @@ function analyzeSelfDependence(
         orderResults.push({ 
             order, 
             hellingerDistance: metrics['Hellinger Distance'], 
-            jensenShannonDistance: metrics['Jensen-Shannon Distance'],
+            jensenShannonDistance: jensenShannonDistance(modelJointDist, fullPastJointDist),
             marginals: {} // Not used for comparison anymore, but kept for type consistency
         });
     }
@@ -357,9 +368,8 @@ function analyzeSelfDependence(
 function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
-    options: AnalysisOptions
 ): AnalysisResult {
-    // FIX: Add explicit type for `row` to prevent `unknown` type inference in `map`. This ensures `instanceData` is correctly typed as `(string | number)[][]` and resolves the assignment error.
+    // FIX: Add explicit type for `row` in `map` to prevent `unknown` type inference, ensuring `instanceData` is correctly typed.
     const instanceData = transpose(data.rows.map((row: (string | number)[]) => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
@@ -414,9 +424,7 @@ function analyzeTimeSeriesEnsemble(
         }
     });
 
-    const selfDependenceAnalysis = options.runMarkovOrderTest 
-        ? analyzeSelfDependence(instanceData, allStates, timeSteps) 
-        : undefined;
+    const selfDependenceAnalysis = analyzeSelfDependence(instanceData, allStates, timeSteps);
 
 
     return {
@@ -438,14 +446,14 @@ export function analyzeStochasticProcess(
   models: ModelDef[],
   transitionMatrixModels: TransitionMatrixModelDef[],
   mode: AnalysisMode,
-  options: AnalysisOptions
+  variableInfo: VariableInfo[]
 ): AnalysisResult {
 
   if (mode === 'timeSeriesEnsemble') {
-      return analyzeTimeSeriesEnsemble(data, transitionMatrixModels, options);
+      return analyzeTimeSeriesEnsemble(data, transitionMatrixModels);
   }
 
-  const empirical = analyzeEmpiricalData(data, mode);
+  const empirical = analyzeEmpiricalData(data, mode, variableInfo);
   const transposedData = transpose(data.rows);
 
   const modelResults: ModelAnalysisResult[] = models

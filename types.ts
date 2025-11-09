@@ -3,9 +3,10 @@ export interface CsvData {
   rows: (string | number)[][];
 }
 
-export interface VariableDef {
+export interface VariableInfo {
   name: string;
   states: string;
+  type: 'numerical' | 'categorical';
 }
 
 export interface Distribution {
@@ -22,7 +23,7 @@ export type ProbabilityModel = ProbabilityModelEntry[];
 export interface ModelDef {
   id: string;
   name: string;
-  variables: VariableDef[];
+  variables: VariableInfo[];
   probabilities: Record<string, number>;
   error: string | null;
   modelString: string;
@@ -39,11 +40,6 @@ export interface TransitionMatrixModelDef {
 }
 
 export type AnalysisMode = 'joint' | 'timeSeries' | 'timeSeriesEnsemble';
-
-export interface AnalysisOptions {
-  runMarkovOrderTest: boolean;
-  runTimeHomogeneityTest: boolean;
-}
 
 export interface Moments {
   mean: number;
@@ -156,6 +152,10 @@ export interface MarkovResult {
 export interface AdvancedTestResult {
   markovOrderTest?: { [variable: string]: { isFirstOrder: boolean; pValue: number; details: string } };
   timeHomogeneityTest?: { [variable: string]: { isHomogeneous: boolean; pValue: number; details: string, evolution?: SelfDependenceData } };
+}
+
+export interface AnalysisOptions {
+  runMarkovOrderTest: boolean;
 }
 
 export interface SelfDependenceData {

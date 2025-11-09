@@ -1,4 +1,4 @@
-import { CsvData, AnalysisMode } from '../types';
+import { CsvData, AnalysisMode, VariableInfo } from '../types';
 
 export function parseCsvData(csvString: string): CsvData {
   const lines = csvString.trim().split('\n');
@@ -17,6 +17,42 @@ export function parseCsvData(csvString: string): CsvData {
 
   return { headers, rows };
 }
+
+export function analyzeCsvStructure(data: CsvData): VariableInfo[] {
+  if (data.headers.length === 0) return [];
+  
+  const infos: Omit<VariableInfo, 'states'>[] = data.headers.map(h => ({
+      name: h,
+      type: 'numerical', // Assume numerical first
+  }));
+
+  const uniqueStates: { [key: string]: Set<string | number> } = {};
+  data.headers.forEach(h => {
+    uniqueStates[h] = new Set();
+  });
+  
+  const headerIndexMap = new Map(data.headers.map((h, i) => [h, i]));
+
+  data.rows.forEach(row => {
+    data.headers.forEach((h, index) => {
+      const value = row[index];
+      if (value !== undefined && value !== '') {
+        uniqueStates[h].add(value);
+        // If we find a non-numeric value that is not an empty string, it's categorical
+        if (typeof value === 'string' && isNaN(Number(value))) {
+            infos[index].type = 'categorical';
+        }
+      }
+    });
+  });
+
+  return infos.map(info => ({
+    ...info,
+    states: Array.from(uniqueStates[info.name]).sort().join(', '),
+    type: info.type as 'numerical' | 'categorical',
+  }));
+}
+
 
 export function detectAnalysisMode(data: CsvData): AnalysisMode {
   if (data.headers.length === 0) {

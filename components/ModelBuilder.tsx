@@ -1,11 +1,11 @@
 import React from 'react';
-import { VariableDef } from '../types';
-import { VariableDefInput } from './VariableDefInput';
+import { VariableInfo } from '../types';
+import { VariableInfoInput } from './VariableInfoInput';
 import { ProbabilityTable } from './ProbabilityTable';
 
 interface ModelBuilderProps {
-  variables: VariableDef[];
-  setVariables: React.Dispatch<React.SetStateAction<VariableDef[]>>;
+  variables: VariableInfo[];
+  setVariables: React.Dispatch<React.SetStateAction<VariableInfo[]>>;
   probabilities: Record<string, number>;
   setProbabilities: React.Dispatch<React.SetStateAction<Record<string, number>>>;
 }
@@ -17,7 +17,7 @@ export const ModelBuilder: React.FC<ModelBuilderProps> = ({
   setProbabilities
 }) => {
 
-  const handleVariableChange = (index: number, updatedVar: VariableDef) => {
+  const handleVariableChange = (index: number, updatedVar: VariableInfo) => {
     const newVariables = [...variables];
     newVariables[index] = updatedVar;
     setVariables(newVariables);
@@ -31,7 +31,7 @@ export const ModelBuilder: React.FC<ModelBuilderProps> = ({
       {variables.length > 0 ? (
         <div className="space-y-4">
           {variables.map((variable, index) => (
-            <VariableDefInput
+            <VariableInfoInput
               key={variable.name}
               variable={variable}
               onChange={(updatedVar) => handleVariableChange(index, updatedVar)}

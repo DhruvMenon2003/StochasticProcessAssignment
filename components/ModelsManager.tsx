@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { ModelDef, VariableDef } from '../types';
+import { ModelDef, VariableInfo } from '../types';
 import { ModelEditor } from './ModelEditor';
 import { PlusIcon } from './icons/PlusIcon';
 import { CalculatorIcon } from './icons/CalculatorIcon';
@@ -7,16 +7,16 @@ import { CalculatorIcon } from './icons/CalculatorIcon';
 interface ModelsManagerProps {
   models: ModelDef[];
   setModels: React.Dispatch<React.SetStateAction<ModelDef[]>>;
-  templateVariables: VariableDef[];
+  variableInfo: VariableInfo[];
 }
 
-export const ModelsManager: React.FC<ModelsManagerProps> = ({ models, setModels, templateVariables }) => {
+export const ModelsManager: React.FC<ModelsManagerProps> = ({ models, setModels, variableInfo }) => {
 
   const handleAddModel = () => {
     const newModel: ModelDef = {
       id: Date.now().toString(),
       name: `Model ${models.length + 1}`,
-      variables: JSON.parse(JSON.stringify(templateVariables)), // Deep copy
+      variables: JSON.parse(JSON.stringify(variableInfo)), // Deep copy
       probabilities: {},
       error: null,
       modelString: '',
