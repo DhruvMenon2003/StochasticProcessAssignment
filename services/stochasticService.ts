@@ -411,8 +411,8 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: Correctly type the call to transpose to avoid type inference issues.
-    const instanceData = transpose(data.rows.map(row => row.slice(1)));
+    // FIX: Explicitly provide generic type to `transpose` to resolve type inference issue.
+    const instanceData = transpose<string | number>(data.rows.map(row => row.slice(1)));
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }

@@ -8,6 +8,7 @@ import { getAnalysisExplanation } from './services/geminiService';
 import { CsvData, VariableInfo, ModelDef, AnalysisResult, AnalysisMode, TransitionMatrixModelDef } from './types';
 import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
 import { TrashIcon } from './components/icons/TrashIcon';
+import { SessionManager } from './components/SessionManager';
 
 const exampleData = `VarX,VarY
 A,1
@@ -26,6 +27,8 @@ Day2,1,3,2,3,2
 Day3,2,3,2,1,2
 Day4,3,1,1,1,3`;
 
+const AUTOSAVE_KEY = 'stochasticAppAutosave';
+const SESSIONS_KEY = 'stochasticAppSessions';
 
 function App() {
   const [csvString, setCsvString] = useState<string>(exampleData);
@@ -37,10 +40,12 @@ function App() {
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [savedSessions, setSavedSessions] = useState<Record<string, any>>({});
 
   // Effect to load data from localStorage on initial render
   useEffect(() => {
-    const savedStateJSON = localStorage.getItem('stochasticAppAutosave');
+    // Load autosaved state
+    const savedStateJSON = localStorage.getItem(AUTOSAVE_KEY);
     if (savedStateJSON) {
       try {
         const savedState = JSON.parse(savedStateJSON);
@@ -49,7 +54,17 @@ function App() {
         if (savedState.transitionMatrixModels) setTransitionMatrixModels(savedState.transitionMatrixModels);
       } catch (e) {
         console.error("Failed to parse saved state from localStorage:", e);
-        localStorage.removeItem('stochasticAppAutosave');
+        localStorage.removeItem(AUTOSAVE_KEY);
+      }
+    }
+     // Load saved sessions
+    const sessionsJSON = localStorage.getItem(SESSIONS_KEY);
+    if (sessionsJSON) {
+      try {
+        setSavedSessions(JSON.parse(sessionsJSON));
+      } catch (e) {
+        console.error("Failed to parse saved sessions from localStorage:", e);
+        localStorage.removeItem(SESSIONS_KEY);
       }
     }
   }, []);
@@ -64,7 +79,7 @@ function App() {
           models,
           transitionMatrixModels,
         };
-        localStorage.setItem('stochasticAppAutosave', JSON.stringify(stateToSave));
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(stateToSave));
         setSaveStatus('saved');
         
         const resetHandler = setTimeout(() => setSaveStatus('idle'), 2000);
@@ -140,12 +155,53 @@ function App() {
     }
   }, [parsedData, models, transitionMatrixModels, analysisMode, variableInfo]);
 
+  const handleSaveSession = useCallback((name: string) => {
+    if (!name.trim()) {
+        alert("Please enter a valid session name.");
+        return;
+    }
+    const stateToSave = {
+      csvString,
+      models,
+      transitionMatrixModels,
+      savedAt: new Date().toISOString(),
+    };
+    const newSavedSessions = { ...savedSessions, [name]: stateToSave };
+    setSavedSessions(newSavedSessions);
+    localStorage.setItem(SESSIONS_KEY, JSON.stringify(newSavedSessions));
+    alert(`Session "${name}" saved.`);
+  }, [csvString, models, transitionMatrixModels, savedSessions]);
+
+  const handleLoadSession = useCallback((name: string) => {
+    const session = savedSessions[name];
+    if (session) {
+      setCsvString(session.csvString ?? '');
+      setModels(session.models ?? []);
+      setTransitionMatrixModels(session.transitionMatrixModels ?? []);
+      setAnalysisResult(null);
+      setExplanation(null);
+      setError(null);
+      alert(`Session "${name}" loaded.`);
+    }
+  }, [savedSessions]);
+
+  const handleDeleteSession = useCallback((name: string) => {
+    if (window.confirm(`Are you sure you want to delete session "${name}"? This action cannot be undone.`)) {
+      const { [name]: _, ...rest } = savedSessions;
+      setSavedSessions(rest);
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(rest));
+    }
+  }, [savedSessions]);
+
+
   const handleClearAndReset = () => {
-    if (window.confirm("Are you sure you want to clear all data and reset to the default example? This action cannot be undone.")) {
-      localStorage.removeItem('stochasticAppAutosave');
+    if (window.confirm("Are you sure you want to clear all data, saved sessions, and reset to the default example? This action cannot be undone.")) {
+      localStorage.removeItem(AUTOSAVE_KEY);
+      localStorage.removeItem(SESSIONS_KEY);
       setCsvString(exampleData);
       setModels([]);
       setTransitionMatrixModels([]);
+      setSavedSessions({});
       setAnalysisResult(null);
       setExplanation(null);
       setError(null);
@@ -174,6 +230,12 @@ function App() {
               Stochastic Process Analyzer
             </h1>
              <div className="flex items-center gap-4">
+                <SessionManager
+                  savedSessions={savedSessions}
+                  onSave={handleSaveSession}
+                  onLoad={handleLoadSession}
+                  onDelete={handleDeleteSession}
+                />
                 <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors">Load Ensemble Example</button>
                 <button 
                     onClick={handleClearAndReset} 
