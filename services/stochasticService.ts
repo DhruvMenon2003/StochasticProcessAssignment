@@ -261,21 +261,17 @@ function analyzeModel(modelDef: ModelDef): DistributionAnalysis {
 function compareDistributions(dist1: Distribution, dist2: Distribution): { [metric: string]: number } {
   const allKeys = Array.from(new Set([...Object.keys(dist1), ...Object.keys(dist2)]));
   let hellinger = 0;
-  let mse = 0;
   
   allKeys.forEach(key => {
     const p1 = dist1[key] || 0;
     const p2 = dist2[key] || 0;
     hellinger += Math.pow(Math.sqrt(p1) - Math.sqrt(p2), 2);
-    mse += Math.pow(p1 - p2, 2);
   });
 
   hellinger = (1 / Math.sqrt(2)) * Math.sqrt(hellinger);
-  mse = mse / allKeys.length;
 
   return { 
     'Hellinger Distance': hellinger, 
-    'Mean Squared Error': mse,
     'Jensen-Shannon Divergence': jensenShannonDivergence(dist1, dist2)
   };
 }
@@ -464,8 +460,9 @@ function analyzeTimeSeriesEnsemble(
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
     // FIX: The `transpose` function can return `undefined` for non-rectangular matrices,
-    // causing TypeScript to infer `unknown[][]`. We cast it to the expected type.
-    const instanceData = transpose(data.rows.map(row => row.slice(1))) as (string | number)[][];
+    // causing TypeScript to infer `unknown[][]`. A double assertion (`as unknown as ...`)
+    // is used here to forcefully cast the result to the expected type and fix the error.
+    const instanceData = transpose(data.rows.map(row => row.slice(1))) as unknown as (string | number)[][];
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }
@@ -555,11 +552,16 @@ export function analyzeStochasticProcess(
     .filter(m => m.modelString && !m.error)
     .map(m => {
         const distributions = analyzeModel(m);
-        const rawMetrics = compareDistributions(empirical.joint, distributions.joint);
+        
+        // Calculate base metrics from joint distributions, which no longer includes MSE.
+        const baseMetrics = compareDistributions(empirical.joint, distributions.joint);
+        
+        const rawMetrics: { [key: string]: number } = {
+            'Hellinger Distance': baseMetrics['Hellinger Distance'],
+            'Jensen-Shannon Divergence': baseMetrics['Jensen-Shannon Divergence'],
+        };
 
-        // --- Overwrite MSE with user-specified formula for numerical variables ---
-        // This new MSE measures the mean squared difference between each data point
-        // and the mean predicted by the theoretical model. It is averaged across all numerical variables.
+        // --- Conditionally calculate and add MSE if and only if numerical variables are present ---
         const numericalVars = variableInfo.filter(v => v.type === 'numerical');
         if (numericalVars.length > 0) {
             let totalMse = 0;
@@ -581,12 +583,11 @@ export function analyzeStochasticProcess(
                 }
             });
 
+            // Add MSE to the metrics object only if it could be calculated for at least one variable.
             if (varsCounted > 0) {
                 rawMetrics['Mean Squared Error'] = totalMse / varsCounted;
             }
-            // If varsCounted is 0 (e.g., model didn't produce a mean), we keep the old MSE.
         }
-        // If no numerical variables exist, the original MSE from compareDistributions is used by default.
 
         const comparisonMetrics: { [metricName: string]: ComparisonMetric } = {};
         Object.keys(rawMetrics).forEach(key => {
