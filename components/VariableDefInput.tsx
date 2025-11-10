@@ -24,15 +24,12 @@ export const VariableInfoInput: React.FC<VariableInfoInputProps> = ({ variable, 
         <label className="block text-xs font-medium text-gray-400 mb-1">
           Variable Type
         </label>
-        <select
-          value={variable.type}
-          onChange={(e) => onChange({ ...variable, type: e.target.value as 'numerical' | 'nominal' | 'ordinal' })}
-          className="w-full p-2 bg-gray-800 text-gray-300 border border-gray-600 rounded-md focus:ring-1 focus:ring-teal-500 focus:border-teal-500 transition-colors text-sm"
+        <div
+          className="w-full p-2 bg-gray-700/50 text-gray-400 border border-gray-600 rounded-md cursor-default text-sm capitalize"
+          title="Variable type is defined by the submitted data and is not editable here."
         >
-          <option value="numerical">Numerical</option>
-          <option value="nominal">Categorical (Nominal)</option>
-          <option value="ordinal">Categorical (Ordinal)</option>
-        </select>
+          {variable.type}
+        </div>
       </div>
       <div className="md:col-span-2">
         <label className="block text-xs font-medium text-gray-400 mb-1">

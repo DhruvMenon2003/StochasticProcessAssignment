@@ -482,10 +482,10 @@ function analyzeTimeSeriesEnsemble(
 ): AnalysisResult {
     // Robustly handle the (T | undefined)[][] return type from transpose without type assertions.
     const transposedData = transpose(data.rows.map(row => row.slice(1)));
-    // FIX: A more robust type guard is used to handle cases where TypeScript might infer
-    // the element type as `unknown`. This ensures correct type narrowing to `string | number`.
+    // FIX: This type guard has been made more explicit to prevent a potential TypeScript
+    // inference issue where the filtered array's element type was inferred as `unknown`.
     const instanceData = transposedData.map(trace =>
-        trace.filter((point): point is string | number => typeof point === 'string' || typeof point === 'number'),
+        trace.filter((point): point is string | number => point != null)
     );
 
     if (instanceData.length === 0 || instanceData[0].length < 2) {
