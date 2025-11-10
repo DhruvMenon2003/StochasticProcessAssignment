@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
@@ -125,35 +126,61 @@ function App() {
   
   const variableInfoString = useMemo(() => JSON.stringify(variableInfo), [variableInfo]);
 
-  // Effect to sync or reset models when the underlying data structure changes.
+  // Effect to intelligently sync or reset models when the underlying data structure changes.
   useEffect(() => {
+    const newVarInfoMap = new Map(variableInfo.map(v => [v.name, v]));
+
     setModels(prevModels => {
-        // If the variable structure is completely different (e.g., different names), reset all models.
-        const prevVarNames = prevModels.length > 0 ? prevModels[0].variables.map(v => v.name).sort().join(',') : '';
-        const newVarNames = variableInfo.map(v => v.name).sort().join(',');
-
-        if (prevVarNames !== newVarNames) {
-            return []; // Major structural change, so reset the models.
+        if (variableInfo.length === 0) {
+            return [];
         }
-
-        // If names are the same, sync variable types and states to existing models.
-        // This handles cases where data editing changes a variable's auto-detected type or state space.
+    
         return prevModels.map(model => {
-            const updatedVariables = JSON.parse(JSON.stringify(variableInfo));
-             if (JSON.stringify(model.variables) === JSON.stringify(updatedVariables)) {
-                return model; // No changes needed for this model.
+            // FIX: Defensively filter model.variables to ensure all elements are valid objects before mapping.
+            // This prevents errors when dealing with potentially corrupt data from localStorage.
+            const validModelVars = (model.variables || []).filter(v => v && typeof v === 'object') as VariableInfo[];
+            const modelVarMap = new Map(validModelVars.map(v => [v.name, v]));
+            
+            // Determine if the set of variable names has changed (additions/removals)
+            const modelVarNames = new Set(validModelVars.map(v => v.name));
+            const newVarNames = new Set(variableInfo.map(v => v.name));
+            const areVarSetsEqual = modelVarNames.size === newVarNames.size && [...modelVarNames].every(name => newVarNames.has(name));
+
+            let probabilitiesNeedReset = !areVarSetsEqual;
+
+            const syncedVariables = variableInfo.map(newInfoFromData => {
+                const existingModelVar = modelVarMap.get(newInfoFromData.name);
+
+                if (existingModelVar) {
+                    // Variable exists. Preserve its name and type from the model, but update its states from the data.
+                    if (existingModelVar.states !== newInfoFromData.states) {
+                        probabilitiesNeedReset = true;
+                    }
+                    return {
+                        ...existingModelVar, // Preserves user-set type
+                        states: newInfoFromData.states, // Takes new states from data
+                    };
+                } else {
+                    // This is a new variable. Add it as is from the empirical data.
+                    return JSON.parse(JSON.stringify(newInfoFromData));
+                }
+            });
+            
+            // If the variables are identical after sync, no need to update the model state.
+            if (JSON.stringify(model.variables) === JSON.stringify(syncedVariables)) {
+                return model;
             }
-            // The variable definitions have changed, so update them and reset probabilities.
+
             return {
                 ...model,
-                variables: updatedVariables,
-                probabilities: {},
+                variables: syncedVariables,
+                probabilities: probabilitiesNeedReset ? {} : model.probabilities,
                 error: null,
             };
         });
     });
-
-    // Always reset transition matrix models when data structure changes.
+    
+    // Always reset transition matrix models if the data structure changes.
     setTransitionMatrixModels([]);
   }, [variableInfoString, isEnsemble]);
 

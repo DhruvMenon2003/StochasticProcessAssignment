@@ -66,36 +66,45 @@ function calculateMoments(dist: Distribution, variable: VariableInfo): Moments {
     const moments: Moments = { mean: null, variance: null, median: null, mode: null };
     const entries = Object.entries(dist);
 
-    if (entries.length === 0) return moments;
+    if (entries.length === 0) {
+        return moments;
+    }
 
-    // --- Mode (all variable types) ---
+    // --- Mode (calculated for all types) ---
     let maxProb = -1;
     let modes: (string | number)[] = [];
     entries.forEach(([state, prob]) => {
-        const numericState = Number(state);
-        const typedState = variable.type === 'numerical' && !isNaN(numericState) ? numericState : state;
         if (prob > maxProb) {
             maxProb = prob;
-            modes = [typedState];
+            modes = [state]; // Start a new list of modes
         } else if (prob === maxProb) {
-            modes.push(typedState);
+            modes.push(state);
         }
     });
-    moments.mode = modes;
 
+    // Try to convert modes to numbers if the variable is numerical
+    const typedModes = modes.map(m => {
+        const num = Number(m);
+        return variable.type === 'numerical' && !isNaN(num) ? num : m;
+    });
+    moments.mode = typedModes;
+
+    // --- Return for Nominal ---
     if (variable.type === 'nominal') {
         return moments;
     }
 
-    // --- Median (ordinal and numerical) ---
+    // --- Median (calculated for Ordinal and Numerical) ---
     let sortedStatesForMedian: (string | number)[];
     if (variable.type === 'numerical') {
         sortedStatesForMedian = Object.keys(dist).map(Number).sort((a, b) => a - b);
-    } else { // ordinal
-        const stateOrder = variable.states.split(',').map(s => s.trim()).filter(Boolean);
+    } else { // 'ordinal'
+        const stateOrder = variable.states.split(',').map(s => s.trim());
         sortedStatesForMedian = Object.keys(dist).sort((a, b) => {
             const indexA = stateOrder.indexOf(a);
             const indexB = stateOrder.indexOf(b);
+            // Handle cases where a state might not be in the defined order
+            if (indexA === -1 && indexB === -1) return a.localeCompare(b);
             if (indexA === -1) return 1;
             if (indexB === -1) return -1;
             return indexA - indexB;
@@ -106,54 +115,63 @@ function calculateMoments(dist: Distribution, variable: VariableInfo): Moments {
     for (const state of sortedStatesForMedian) {
         cumulativeProb += dist[String(state)] || 0;
         if (cumulativeProb >= 0.5) {
-            const numericState = Number(state);
-            moments.median = variable.type === 'numerical' && !isNaN(numericState) ? numericState : state;
+            const numState = Number(state);
+            moments.median = variable.type === 'numerical' && !isNaN(numState) ? numState : state;
             break;
         }
     }
     
+    // --- Return for Ordinal ---
     if (variable.type === 'ordinal') {
         return moments;
     }
 
-    // --- Mean & Variance (numerical only) ---
-    const numEntries = Object.entries(dist).map(([state, prob]) => ({
-        value: parseFloat(state),
-        prob: prob,
-    })).filter(e => !isNaN(e.value));
+    // --- Mean & Variance (calculated for Numerical only) ---
+    const numEntries = Object.entries(dist)
+        .map(([state, prob]) => ({ value: parseFloat(state), prob }))
+        .filter(e => !isNaN(e.value));
 
     if (numEntries.length > 0) {
-        let mean = 0;
-        numEntries.forEach(({ value, prob }) => {
-            mean += value * prob;
-        });
+        const mean = numEntries.reduce((sum, { value, prob }) => sum + value * prob, 0);
         moments.mean = mean;
         
-        let variance = 0;
-        numEntries.forEach(({ value, prob }) => {
-            variance += Math.pow(value - mean, 2) * prob;
-        });
+        const variance = numEntries.reduce((sum, { value, prob }) => sum + Math.pow(value - mean, 2) * prob, 0);
         moments.variance = variance;
     }
     
     return moments;
 }
 
-
 function calculateCmf(pmf: Distribution, variable: VariableInfo): Distribution {
     if (Object.keys(pmf).length === 0) {
         return {};
     }
 
+    // Determine the order of states for cumulation based on variable type
     let sortedStates: (string|number)[];
     
-    if (variable.type === 'numerical') {
-        sortedStates = Object.keys(pmf).map(Number).sort((a, b) => a - b);
-    } else if (variable.type === 'ordinal') {
-        const stringStates = variable.states.split(',').map(s => s.trim()).filter(Boolean);
-        sortedStates = stringStates.map(s => !isNaN(Number(s)) && s.trim() !== '' ? Number(s) : s);
-    } else { // nominal
-        sortedStates = Object.keys(pmf).sort((a, b) => a.localeCompare(b));
+    switch (variable.type) {
+        case 'numerical':
+            // Sort numerically
+            sortedStates = Object.keys(pmf).map(Number).sort((a, b) => a - b);
+            break;
+        case 'ordinal':
+            // Sort based on the predefined order in variable.states
+            const stateOrder = variable.states.split(',').map(s => s.trim());
+            sortedStates = Object.keys(pmf).sort((a, b) => {
+                const indexA = stateOrder.indexOf(a);
+                const indexB = stateOrder.indexOf(b);
+                if (indexA === -1 && indexB === -1) return a.localeCompare(b);
+                if (indexA === -1) return 1;
+                if (indexB === -1) return -1;
+                return indexA - indexB;
+            });
+            break;
+        case 'nominal':
+        default:
+            // For nominal, sort alphabetically as a standard convention
+            sortedStates = Object.keys(pmf).sort((a, b) => a.localeCompare(b));
+            break;
     }
     
     const cmf: Distribution = {};
@@ -163,7 +181,8 @@ function calculateCmf(pmf: Distribution, variable: VariableInfo): Distribution {
         const stateKey = String(state);
         const prob = pmf[stateKey] || 0;
         cumulativeProb += prob;
-        cmf[stateKey] = cumulativeProb;
+        // Round to avoid floating point issues in display
+        cmf[stateKey] = parseFloat(cumulativeProb.toPrecision(15));
     }
 
     return cmf;
@@ -272,7 +291,7 @@ function compareDistributions(dist1: Distribution, dist2: Distribution): { [metr
 
   return { 
     'Hellinger Distance': hellinger, 
-    'Jensen-Shannon Divergence': jensenShannonDivergence(dist1, dist2)
+    'Jensen-Shannon Distance': jensenShannonDistance(dist1, dist2)
   };
 }
 
@@ -386,7 +405,7 @@ function analyzeSelfDependence(
         orderResults.push({ 
             order, 
             hellingerDistance: metrics['Hellinger Distance'], 
-            jensenShannonDistance: jensenShannonDistance(modelJointDist, fullPastJointDist),
+            jensenShannonDistance: metrics['Jensen-Shannon Distance'],
             marginals: {} // Not used for comparison anymore, but kept for type consistency
         });
     }
@@ -459,10 +478,12 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: The `transpose` function can return `undefined` for non-rectangular matrices,
-    // causing a type error. A double assertion (`as unknown as ...`) is used here
-    // to forcefully cast the result to the expected type.
-    const instanceData = transpose(data.rows.map(row => row.slice(1))) as unknown as (string | number)[][];
+    // FIX: The `transpose` function can introduce `undefined` for non-rectangular matrices.
+    // This is resolved by mapping over the transposed data and filtering out any undefined
+    // values from each trace, ensuring `instanceData` is of type `(string | number)[][]`.
+    const instanceData = (transpose(data.rows.map(row => row.slice(1))) as (string|number|undefined)[][]).map(
+        trace => trace.filter(point => point !== undefined) as (string|number)[]
+    );
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }
@@ -558,7 +579,7 @@ export function analyzeStochasticProcess(
         
         const rawMetrics: { [key: string]: number } = {
             'Hellinger Distance': baseMetrics['Hellinger Distance'],
-            'Jensen-Shannon Divergence': baseMetrics['Jensen-Shannon Divergence'],
+            'Jensen-Shannon Distance': baseMetrics['Jensen-Shannon Distance'],
         };
 
         // --- Conditionally calculate and add MSE if and only if numerical variables are present ---
