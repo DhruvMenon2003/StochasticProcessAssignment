@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { DataInput } from './components/DataInput';
 import { ModelsManager } from './components/ModelsManager';
@@ -10,6 +9,7 @@ import { CsvData, VariableInfo, ModelDef, AnalysisResult, AnalysisMode, Transiti
 import { TransitionMatrixModelsManager } from './components/TransitionMatrixModelsManager';
 import { TrashIcon } from './components/icons/TrashIcon';
 import { SessionManager } from './components/SessionManager';
+import { VariableTypeModal } from './components/VariableTypeModal';
 
 const exampleData = `VarX,VarY
 A,1
@@ -32,7 +32,9 @@ const AUTOSAVE_KEY = 'stochasticAppAutosave';
 const SESSIONS_KEY = 'stochasticAppSessions';
 
 function App() {
-  const [csvString, setCsvString] = useState<string>(exampleData);
+  const [stagedCsvString, setStagedCsvString] = useState<string>(exampleData);
+  const [submittedCsvString, setSubmittedCsvString] = useState<string>(exampleData);
+
   const [models, setModels] = useState<ModelDef[]>([]);
   const [transitionMatrixModels, setTransitionMatrixModels] = useState<TransitionMatrixModelDef[]>([]);
 
@@ -43,6 +45,10 @@ function App() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [savedSessions, setSavedSessions] = useState<Record<string, any>>({});
 
+  const [isTypeModalOpen, setIsTypeModalOpen] = useState(false);
+  const [pendingVariableInfo, setPendingVariableInfo] = useState<VariableInfo[]>([]);
+  const [variableInfo, setVariableInfo] = useState<VariableInfo[]>([]);
+
   // Effect to load data from localStorage on initial render
   useEffect(() => {
     // Load autosaved state
@@ -50,13 +56,21 @@ function App() {
     if (savedStateJSON) {
       try {
         const savedState = JSON.parse(savedStateJSON);
-        if (savedState.csvString) setCsvString(savedState.csvString);
+        if (savedState.submittedCsvString) {
+            setSubmittedCsvString(savedState.submittedCsvString);
+            setStagedCsvString(savedState.submittedCsvString);
+        }
+        if (savedState.variableInfo) setVariableInfo(savedState.variableInfo);
         if (savedState.models) setModels(savedState.models);
         if (savedState.transitionMatrixModels) setTransitionMatrixModels(savedState.transitionMatrixModels);
       } catch (e) {
         console.error("Failed to parse saved state from localStorage:", e);
         localStorage.removeItem(AUTOSAVE_KEY);
       }
+    } else {
+        // If no saved state, initialize with example data
+        const initialParsed = parseCsvData(exampleData);
+        setVariableInfo(analyzeCsvStructure(initialParsed));
     }
      // Load saved sessions
     const sessionsJSON = localStorage.getItem(SESSIONS_KEY);
@@ -76,7 +90,8 @@ function App() {
     const handler = setTimeout(() => {
       try {
         const stateToSave = {
-          csvString,
+          submittedCsvString,
+          variableInfo,
           models,
           transitionMatrixModels,
         };
@@ -95,34 +110,19 @@ function App() {
     return () => {
       clearTimeout(handler);
     };
-  }, [csvString, models, transitionMatrixModels]);
+  }, [submittedCsvString, variableInfo, models, transitionMatrixModels]);
 
   const parsedData = useMemo<CsvData>(() => {
     try {
-      return parseCsvData(csvString);
+      return parseCsvData(submittedCsvString);
     } catch (e) {
       console.error("CSV parsing error:", e);
       return { headers: [], rows: [] };
     }
-  }, [csvString]);
+  }, [submittedCsvString]);
 
   const analysisMode = useMemo(() => detectAnalysisMode(parsedData), [parsedData]);
   const isEnsemble = analysisMode === 'timeSeriesEnsemble';
-
-  const variableInfo = useMemo<VariableInfo[]>(() => {
-    if (isEnsemble) {
-        if (parsedData.rows.length === 0) return [];
-        const allStates = new Set(parsedData.rows.flatMap((row: (string|number)[]) => row.slice(1)));
-        const statesArray = Array.from(allStates).sort();
-        const isNumeric = statesArray.every(s => typeof s === 'number');
-        return [{
-            name: "State",
-            states: statesArray.join(', '),
-            type: isNumeric ? 'numerical' : 'nominal',
-        }];
-    }
-    return analyzeCsvStructure(parsedData);
-  }, [parsedData, isEnsemble]);
   
   const variableInfoString = useMemo(() => JSON.stringify(variableInfo), [variableInfo]);
 
@@ -136,12 +136,9 @@ function App() {
         }
     
         return prevModels.map(model => {
-            // FIX: Defensively filter model.variables to ensure all elements are valid objects before mapping.
-            // This prevents errors when dealing with potentially corrupt data from localStorage.
             const validModelVars = (model.variables || []).filter(v => v && typeof v === 'object') as VariableInfo[];
             const modelVarMap = new Map(validModelVars.map(v => [v.name, v]));
             
-            // Determine if the set of variable names has changed (additions/removals)
             const modelVarNames = new Set(validModelVars.map(v => v.name));
             const newVarNames = new Set(variableInfo.map(v => v.name));
             const areVarSetsEqual = modelVarNames.size === newVarNames.size && [...modelVarNames].every(name => newVarNames.has(name));
@@ -152,21 +149,18 @@ function App() {
                 const existingModelVar = modelVarMap.get(newInfoFromData.name);
 
                 if (existingModelVar) {
-                    // Variable exists. Preserve its name and type from the model, but update its states from the data.
                     if (existingModelVar.states !== newInfoFromData.states) {
                         probabilitiesNeedReset = true;
                     }
                     return {
-                        ...existingModelVar, // Preserves user-set type
-                        states: newInfoFromData.states, // Takes new states from data
+                        ...existingModelVar,
+                        states: newInfoFromData.states,
                     };
                 } else {
-                    // This is a new variable. Add it as is from the empirical data.
                     return JSON.parse(JSON.stringify(newInfoFromData));
                 }
             });
             
-            // If the variables are identical after sync, no need to update the model state.
             if (JSON.stringify(model.variables) === JSON.stringify(syncedVariables)) {
                 return model;
             }
@@ -180,9 +174,34 @@ function App() {
         });
     });
     
-    // Always reset transition matrix models if the data structure changes.
-    setTransitionMatrixModels([]);
-  }, [variableInfoString, isEnsemble]);
+  }, [variableInfoString]);
+
+  const handleDataSubmit = useCallback(() => {
+    try {
+        const data = parseCsvData(stagedCsvString);
+        if (data.headers.length === 0 || data.rows.length === 0) {
+            alert("The submitted CSV data is empty or invalid. Please provide data with a header row.");
+            return;
+        }
+        const initialVarInfo = analyzeCsvStructure(data);
+        setPendingVariableInfo(initialVarInfo);
+        setIsTypeModalOpen(true);
+    } catch (e: any) {
+        alert(`Error parsing CSV: ${e.message}`);
+    }
+  }, [stagedCsvString]);
+
+  const handleTypeConfirmation = useCallback((confirmedInfo: VariableInfo[]) => {
+      setVariableInfo(confirmedInfo);
+      setSubmittedCsvString(stagedCsvString);
+      // Reset models and results for a clean slate with the new data structure
+      setModels([]);
+      setTransitionMatrixModels([]);
+      setAnalysisResult(null);
+      setExplanation(null);
+      setError(null);
+      setIsTypeModalOpen(false);
+  }, [stagedCsvString]);
 
 
   const handleAnalyze = useCallback(async () => {
@@ -216,7 +235,8 @@ function App() {
         return;
     }
     const stateToSave = {
-      csvString,
+      submittedCsvString,
+      variableInfo,
       models,
       transitionMatrixModels,
       savedAt: new Date().toISOString(),
@@ -225,12 +245,14 @@ function App() {
     setSavedSessions(newSavedSessions);
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(newSavedSessions));
     alert(`Session "${name}" saved.`);
-  }, [csvString, models, transitionMatrixModels, savedSessions]);
+  }, [submittedCsvString, variableInfo, models, transitionMatrixModels, savedSessions]);
 
   const handleLoadSession = useCallback((name: string) => {
     const session = savedSessions[name];
     if (session) {
-      setCsvString(session.csvString ?? '');
+      setSubmittedCsvString(session.submittedCsvString ?? '');
+      setStagedCsvString(session.submittedCsvString ?? '');
+      setVariableInfo(session.variableInfo ?? []);
       setModels(session.models ?? []);
       setTransitionMatrixModels(session.transitionMatrixModels ?? []);
       setAnalysisResult(null);
@@ -251,28 +273,49 @@ function App() {
 
   const handleImportSessions = useCallback((jsonData: string) => {
     try {
-      // Sanitize the input string to remove leading whitespace and potential
-      // Byte Order Mark (BOM) which can cause JSON.parse to fail.
       const sanitizedJsonData = jsonData.trim().replace(/^\uFEFF/, '');
       
       if (!sanitizedJsonData) {
           throw new Error("Imported session file is empty.");
       }
       
-      const importedSessions = JSON.parse(sanitizedJsonData);
-      if (typeof importedSessions !== 'object' || importedSessions === null || Array.isArray(importedSessions)) {
+      const parsedJson = JSON.parse(sanitizedJsonData);
+      if (typeof parsedJson !== 'object' || parsedJson === null || Array.isArray(parsedJson)) {
         throw new Error("Invalid session file. Must be a JSON object of sessions.");
       }
-       // Basic validation: check if at least one value looks like a session object
-      const firstKey = Object.keys(importedSessions)[0];
-      if (firstKey && typeof importedSessions[firstKey].csvString === 'undefined') {
-         throw new Error("JSON structure does not match session format.");
+      
+      const validImportedSessions: Record<string, any> = {};
+      let invalidCount = 0;
+
+      for (const key in parsedJson) {
+          if (Object.prototype.hasOwnProperty.call(parsedJson, key)) {
+              const session = parsedJson[key];
+              // A simple but effective check: does it look like a session object?
+              // It must be an object and contain the 'submittedCsvString' key.
+              if (session && typeof session === 'object' && typeof session.submittedCsvString !== 'undefined') {
+                  validImportedSessions[key] = session;
+              } else {
+                  invalidCount++;
+              }
+          }
+      }
+      
+      const validCount = Object.keys(validImportedSessions).length;
+
+      if (validCount === 0) {
+          throw new Error("No valid sessions found in the file. Please ensure the JSON structure matches the session format (e.g., contains 'submittedCsvString').");
       }
 
-      const newSavedSessions = { ...savedSessions, ...importedSessions };
+      const newSavedSessions = { ...savedSessions, ...validImportedSessions };
       setSavedSessions(newSavedSessions);
       localStorage.setItem(SESSIONS_KEY, JSON.stringify(newSavedSessions));
-      alert(`Successfully imported and merged ${Object.keys(importedSessions).length} session(s).`);
+      
+      let alertMessage = `Successfully imported and merged ${validCount} session(s).`;
+      if (invalidCount > 0) {
+          alertMessage += `\nNote: ${invalidCount} invalid entries were found and ignored.`;
+      }
+      alert(alertMessage);
+
     } catch (e: any) {
       alert(`Import failed: ${e.message}`);
       console.error("Failed to import sessions:", e);
@@ -284,7 +327,10 @@ function App() {
     if (window.confirm("Are you sure you want to clear all data, saved sessions, and reset to the default example? This action cannot be undone.")) {
       localStorage.removeItem(AUTOSAVE_KEY);
       localStorage.removeItem(SESSIONS_KEY);
-      setCsvString(exampleData);
+      const initialParsed = parseCsvData(exampleData);
+      setStagedCsvString(exampleData);
+      setSubmittedCsvString(exampleData);
+      setVariableInfo(analyzeCsvStructure(initialParsed));
       setModels([]);
       setTransitionMatrixModels([]);
       setSavedSessions({});
@@ -309,6 +355,12 @@ function App() {
 
   return (
     <div className="bg-gray-900 text-gray-200 min-h-screen font-sans">
+      <VariableTypeModal
+        isOpen={isTypeModalOpen}
+        initialVariables={pendingVariableInfo}
+        onConfirm={handleTypeConfirmation}
+        onCancel={() => setIsTypeModalOpen(false)}
+      />
       <header className="bg-gray-900/80 backdrop-blur-sm sticky top-0 z-20 border-b border-gray-700">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
@@ -323,7 +375,7 @@ function App() {
                   onDelete={handleDeleteSession}
                   onImport={handleImportSessions}
                 />
-                <button onClick={() => setCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors">Load Ensemble Example</button>
+                <button onClick={() => setStagedCsvString(exampleEnsembleData)} className="text-xs bg-gray-700 hover:bg-gray-600 p-2 rounded transition-colors">Load Ensemble Example</button>
                 <button 
                     onClick={handleClearAndReset} 
                     className="text-xs flex items-center gap-1.5 bg-red-800/50 hover:bg-red-700/50 p-2 rounded text-red-300 transition-colors" 
@@ -339,7 +391,11 @@ function App() {
       <main className="container mx-auto p-4 sm:p-6 lg:p-8">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="space-y-8">
-            <DataInput value={csvString} onChange={setCsvString} />
+            <DataInput 
+              value={stagedCsvString} 
+              onChange={setStagedCsvString}
+              onSubmit={handleDataSubmit}
+            />
             {isEnsemble ? (
                 <TransitionMatrixModelsManager
                     models={transitionMatrixModels}
@@ -358,7 +414,7 @@ function App() {
                      <div>
                         <label className="block text-sm font-medium text-gray-400 mb-2">Analysis Mode</label>
                          <div className="bg-gray-900 border border-gray-600 text-blue-300 text-sm rounded-lg block w-full p-2.5">
-                            {modeDisplayNames[analysisMode]} <span className="text-gray-500">- Auto-detected</span>
+                            {modeDisplayNames[analysisMode]} <span className="text-gray-500">- Auto-detected from submitted data</span>
                         </div>
                         <p className="text-xs text-gray-500 mt-1">
                             {modeDescriptions[analysisMode]}
