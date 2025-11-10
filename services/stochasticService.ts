@@ -227,7 +227,9 @@ function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode, variableInfo: V
     if (mode === 'joint') {
         marginals[header] = getMarginal(jointDist, headers, i);
     } else { // timeSeries
-        marginals[header] = normalize(getCounts(transposedData[i]));
+        // The transposed column may contain `undefined`. Filter these out before calculating counts.
+        const columnData = transposedData[i].filter(v => v !== undefined);
+        marginals[header] = normalize(getCounts(columnData));
     }
   });
 
@@ -478,12 +480,14 @@ function analyzeTimeSeriesEnsemble(
     data: CsvData,
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
-    // FIX: The `transpose` function can introduce `undefined` for non-rectangular matrices.
-    // This is resolved by mapping over the transposed data and filtering out any undefined
-    // values from each trace, ensuring `instanceData` is of type `(string | number)[][]`.
-    const instanceData = (transpose(data.rows.map(row => row.slice(1))) as (string|number|undefined)[][]).map(
-        trace => trace.filter(point => point !== undefined) as (string|number)[]
+    // Robustly handle the (T | undefined)[][] return type from transpose without type assertions.
+    const transposedData = transpose(data.rows.map(row => row.slice(1)));
+    // FIX: Add a type guard to the filter to ensure TypeScript correctly narrows the type
+    // of `instanceData` to `(string | number)[][]` and resolves the `unknown[][]` inference issue.
+    const instanceData = transposedData.map(trace =>
+        trace.filter((point): point is string | number => point !== undefined),
     );
+
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
     }
@@ -593,7 +597,10 @@ export function analyzeStochasticProcess(
                 const modelMean = distributions.moments?.[vInfo.name]?.mean;
 
                 if (varIndex !== -1 && modelMean !== null && typeof modelMean !== 'undefined') {
-                    const variableData = transposedData[varIndex].filter(val => typeof val === 'number' && isFinite(val as number)) as number[];
+                    // Robustly filter for finite numbers without type assertions
+                    const variableData = (transposedData[varIndex] || []).filter(
+                        (val): val is number => typeof val === 'number' && isFinite(val)
+                    );
                     const n = variableData.length;
                     if (n > 0) {
                         const squaredErrors = variableData.map(val => Math.pow(val - modelMean, 2));
@@ -657,7 +664,8 @@ export function analyzeStochasticProcess(
   if(mode === 'timeSeries') {
     markovResult = {};
     data.headers.forEach((h, i) => {
-        const {matrix, states} = calculateTransitionMatrix(transposedData[i]);
+        const columnData = (transposedData[i] || []).filter(v => v !== undefined);
+        const {matrix, states} = calculateTransitionMatrix(columnData);
         markovResult![h] = { states, transitionMatrix: matrix };
     });
   }

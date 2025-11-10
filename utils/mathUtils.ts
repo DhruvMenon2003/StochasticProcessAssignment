@@ -19,16 +19,29 @@ export function cartesianProduct<T>(...arrays: T[][]): T[][] {
 }
 
 /**
- * Transposes a 2D array (matrix).
+ * Transposes a 2D array (matrix). If the matrix rows are of unequal length,
+ * the resulting columns will be padded with `undefined` to match the length
+ * of the longest row.
  * @param matrix The matrix to transpose.
- * @returns The transposed matrix.
+ * @returns The transposed matrix, which may contain `undefined` values.
  */
-export function transpose<T>(matrix: T[][]): T[][] {
-  if (!matrix || matrix.length === 0 || matrix[0].length === 0) {
+export function transpose<T>(matrix: T[][]): (T | undefined)[][] {
+  if (!matrix || matrix.length === 0) {
     return [];
   }
-  return matrix[0].map((_, colIndex) => matrix.map(row => row[colIndex]));
+  const numRows = matrix.length;
+  const numCols = Math.max(...matrix.map(row => row.length));
+
+  const transposed: (T | undefined)[][] = [];
+  for (let j = 0; j < numCols; j++) {
+    transposed[j] = Array(numRows);
+    for (let i = 0; i < numRows; i++) {
+      transposed[j][i] = matrix[i][j];
+    }
+  }
+  return transposed;
 }
+
 
 /**
  * Calculates the Kullback-Leibler (KL) divergence between two distributions.
