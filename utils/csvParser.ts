@@ -54,23 +54,30 @@ export function analyzeCsvStructure(data: CsvData): VariableInfo[] {
 
 
 export function detectAnalysisMode(data: CsvData): AnalysisMode {
-  if (data.headers.length === 0) {
+  if (data.headers.length < 1 || data.rows.length < 1) {
     return 'joint'; // Default for empty/invalid data
   }
   
-  const firstHeader = data.headers[0]?.toLowerCase().trim();
-  const secondHeader = data.headers[1]?.toLowerCase().trim();
+  const headers = data.headers.map(h => h.toLowerCase().trim());
+  const firstHeader = headers[0];
 
-  // Rule 1: Ensemble
-  if (data.headers.length >= 2 && firstHeader === 'time' && secondHeader?.startsWith('instance')) {
+  // Stricter check for Ensemble data format.
+  // The first column header must be 'time', and ALL subsequent headers must start with 'instance'.
+  // This prevents misclassification of regular time-series data and avoids downstream errors.
+  const isEnsemble = headers.length >= 2 && 
+                     firstHeader === 'time' && 
+                     headers.slice(1).every(h => h.startsWith('instance'));
+
+  if (isEnsemble) {
     return 'timeSeriesEnsemble';
   }
   
-  // Rule 2: Single Time Series
+  // A single 'time' column indicates a standard time series.
+  // This check MUST come after the more specific ensemble check.
   if (firstHeader === 'time') {
     return 'timeSeries';
   }
 
-  // Rule 3: Cross-Sectional
+  // Default to cross-sectional analysis for all other data structures.
   return 'joint';
 }
