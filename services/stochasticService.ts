@@ -484,7 +484,7 @@ function analyzeTimeSeriesEnsemble(
     const transposedData = transpose(data.rows.map(row => row.slice(1)));
     // FIX: A type assertion was failing to correctly type the filtered array. Using a
     // type guard with .filter() is the correct and type-safe way to narrow the array elements.
-    const instanceData = transposedData.map(trace =>
+    const instanceData = transposedData.map((trace: ((string|number)|undefined)[]) =>
         trace.filter((point): point is string | number => point != null)
     );
 
