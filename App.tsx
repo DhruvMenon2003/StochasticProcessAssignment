@@ -123,11 +123,39 @@ function App() {
     return analyzeCsvStructure(parsedData);
   }, [parsedData, isEnsemble]);
   
-  // Reset models if headers/data format change
+  const variableInfoString = useMemo(() => JSON.stringify(variableInfo), [variableInfo]);
+
+  // Effect to sync or reset models when the underlying data structure changes.
   useEffect(() => {
-     setModels([]);
-     setTransitionMatrixModels([]);
-  }, [variableInfo.map(v => v.name).join(','), isEnsemble]);
+    setModels(prevModels => {
+        // If the variable structure is completely different (e.g., different names), reset all models.
+        const prevVarNames = prevModels.length > 0 ? prevModels[0].variables.map(v => v.name).sort().join(',') : '';
+        const newVarNames = variableInfo.map(v => v.name).sort().join(',');
+
+        if (prevVarNames !== newVarNames) {
+            return []; // Major structural change, so reset the models.
+        }
+
+        // If names are the same, sync variable types and states to existing models.
+        // This handles cases where data editing changes a variable's auto-detected type or state space.
+        return prevModels.map(model => {
+            const updatedVariables = JSON.parse(JSON.stringify(variableInfo));
+             if (JSON.stringify(model.variables) === JSON.stringify(updatedVariables)) {
+                return model; // No changes needed for this model.
+            }
+            // The variable definitions have changed, so update them and reset probabilities.
+            return {
+                ...model,
+                variables: updatedVariables,
+                probabilities: {},
+                error: null,
+            };
+        });
+    });
+
+    // Always reset transition matrix models when data structure changes.
+    setTransitionMatrixModels([]);
+  }, [variableInfoString, isEnsemble]);
 
 
   const handleAnalyze = useCallback(async () => {

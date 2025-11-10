@@ -68,7 +68,7 @@ function calculateMoments(dist: Distribution, variable: VariableInfo): Moments {
 
     if (entries.length === 0) return moments;
 
-    // Calculate Mode (for all types)
+    // --- Mode (all variable types) ---
     let maxProb = -1;
     let modes: (string | number)[] = [];
     entries.forEach(([state, prob]) => {
@@ -83,60 +83,65 @@ function calculateMoments(dist: Distribution, variable: VariableInfo): Moments {
     });
     moments.mode = modes;
 
-    // Calculate Median (for Ordinal and Numerical)
-    if (variable.type === 'ordinal' || variable.type === 'numerical') {
-        let sortedStates: (string | number)[];
-        if (variable.type === 'numerical') {
-            sortedStates = Object.keys(dist).map(Number).sort((a, b) => a - b);
-        } else { // ordinal
-            const stateOrder = variable.states.split(',').map(s => s.trim()).filter(Boolean);
-            sortedStates = Object.keys(dist).sort((a, b) => {
-                const indexA = stateOrder.indexOf(a);
-                const indexB = stateOrder.indexOf(b);
-                if (indexA === -1) return 1;
-                if (indexB === -1) return -1;
-                return indexA - indexB;
-            });
-        }
-
-        let cumulativeProb = 0;
-        for (const state of sortedStates) {
-            cumulativeProb += dist[String(state)] || 0;
-            if (cumulativeProb >= 0.5) {
-                const numericState = Number(state);
-                moments.median = variable.type === 'numerical' && !isNaN(numericState) ? numericState : state;
-                break;
-            }
-        }
+    if (variable.type === 'nominal') {
+        return moments;
     }
 
-    // Calculate Mean and Variance (for Numerical only)
+    // --- Median (ordinal and numerical) ---
+    let sortedStatesForMedian: (string | number)[];
     if (variable.type === 'numerical') {
-        const numEntries = Object.entries(dist).map(([state, prob]) => ({
-            value: parseFloat(state),
-            prob: prob,
-        })).filter(e => !isNaN(e.value));
+        sortedStatesForMedian = Object.keys(dist).map(Number).sort((a, b) => a - b);
+    } else { // ordinal
+        const stateOrder = variable.states.split(',').map(s => s.trim()).filter(Boolean);
+        sortedStatesForMedian = Object.keys(dist).sort((a, b) => {
+            const indexA = stateOrder.indexOf(a);
+            const indexB = stateOrder.indexOf(b);
+            if (indexA === -1) return 1;
+            if (indexB === -1) return -1;
+            return indexA - indexB;
+        });
+    }
 
-        if (numEntries.length > 0) {
-            let mean = 0;
-            numEntries.forEach(({ value, prob }) => {
-                mean += value * prob;
-            });
-            moments.mean = mean;
-            
-            let variance = 0;
-            numEntries.forEach(({ value, prob }) => {
-                variance += Math.pow(value - mean, 2) * prob;
-            });
-            moments.variance = variance;
+    let cumulativeProb = 0;
+    for (const state of sortedStatesForMedian) {
+        cumulativeProb += dist[String(state)] || 0;
+        if (cumulativeProb >= 0.5) {
+            const numericState = Number(state);
+            moments.median = variable.type === 'numerical' && !isNaN(numericState) ? numericState : state;
+            break;
         }
     }
+    
+    if (variable.type === 'ordinal') {
+        return moments;
+    }
+
+    // --- Mean & Variance (numerical only) ---
+    const numEntries = Object.entries(dist).map(([state, prob]) => ({
+        value: parseFloat(state),
+        prob: prob,
+    })).filter(e => !isNaN(e.value));
+
+    if (numEntries.length > 0) {
+        let mean = 0;
+        numEntries.forEach(({ value, prob }) => {
+            mean += value * prob;
+        });
+        moments.mean = mean;
+        
+        let variance = 0;
+        numEntries.forEach(({ value, prob }) => {
+            variance += Math.pow(value - mean, 2) * prob;
+        });
+        moments.variance = variance;
+    }
+    
     return moments;
 }
 
 
 function calculateCmf(pmf: Distribution, variable: VariableInfo): Distribution {
-    if (variable.type === 'nominal' || Object.keys(pmf).length === 0) {
+    if (Object.keys(pmf).length === 0) {
         return {};
     }
 
@@ -144,12 +149,11 @@ function calculateCmf(pmf: Distribution, variable: VariableInfo): Distribution {
     
     if (variable.type === 'numerical') {
         sortedStates = Object.keys(pmf).map(Number).sort((a, b) => a - b);
-    } else { // ordinal
-        // FIX: Use a temporary variable to hold string states before converting to numbers
-        // to avoid TypeScript inferring `s` as `string | number` in the subsequent map.
+    } else if (variable.type === 'ordinal') {
         const stringStates = variable.states.split(',').map(s => s.trim()).filter(Boolean);
-        // Also convert to number if possible to match pmf keys
         sortedStates = stringStates.map(s => !isNaN(Number(s)) && s.trim() !== '' ? Number(s) : s);
+    } else { // nominal
+        sortedStates = Object.keys(pmf).sort((a, b) => a.localeCompare(b));
     }
     
     const cmf: Distribution = {};
@@ -215,9 +219,7 @@ function analyzeEmpiricalData(data: CsvData, mode: AnalysisMode, variableInfo: V
       const marginal = marginals[v.name];
       if (marginal) {
         moments[v.name] = calculateMoments(marginal, v);
-        if ((v.type === 'numerical' || v.type === 'ordinal')) {
-          cmfs[v.name] = calculateCmf(marginal, v);
-        }
+        cmfs[v.name] = calculateCmf(marginal, v);
       }
   });
   
@@ -249,9 +251,7 @@ function analyzeModel(modelDef: ModelDef): DistributionAnalysis {
       const marginal = marginals[v.name];
       if (marginal) {
         moments[v.name] = calculateMoments(marginal, v);
-        if ((v.type === 'numerical' || v.type === 'ordinal')) {
-          cmfs[v.name] = calculateCmf(marginal, v);
-        }
+        cmfs[v.name] = calculateCmf(marginal, v);
       }
   });
 
@@ -460,8 +460,8 @@ function analyzeTimeSeriesEnsemble(
     models: TransitionMatrixModelDef[],
 ): AnalysisResult {
     // FIX: The `transpose` function can return `undefined` for non-rectangular matrices,
-    // causing TypeScript to infer `unknown[][]`. A double assertion (`as unknown as ...`)
-    // is used here to forcefully cast the result to the expected type and fix the error.
+    // causing a type error. A double assertion (`as unknown as ...`) is used here
+    // to forcefully cast the result to the expected type.
     const instanceData = transpose(data.rows.map(row => row.slice(1))) as unknown as (string | number)[][];
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
