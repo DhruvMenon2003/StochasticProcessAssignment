@@ -574,8 +574,8 @@ function analyzeSelfDependence(
             if (!condDistMap) continue;
 
             const conditionedTimes = conditionIndices.map(i => timeSteps[i] as string);
-            const conditionedStateSpaces = Array(conditionIndices.length).fill(states);
-            const conditionedStatesCombinations = cartesianProduct(...conditionedStateSpaces);
+            const conditionedStateSpaces: (string | number)[][] = Array(conditionIndices.length).fill(states);
+            const conditionedStatesCombinations = cartesianProduct<string | number>(...conditionedStateSpaces);
             const matrix: number[][] = [];
 
             conditionedStatesCombinations.forEach(combo => {
