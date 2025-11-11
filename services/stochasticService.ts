@@ -484,15 +484,10 @@ function analyzeTimeSeriesEnsemble(
     
     // FIX: Type 'unknown[][]' is not assignable to type '(string | number)[][]'.
     // The 'transpose' function can return undefined for uneven rows, and type inference
-    // can fail in some environments. We need to manually filter out undefined/null values
-    // to ensure instanceData has the correct type.
-    const instanceData = transposedData.reduce<(string | number)[][]>((acc, trace) => {
-        if (trace) {
-            const filteredTrace = trace.filter((point): point is string | number => point != null);
-            acc.push(filteredTrace);
-        }
-        return acc;
-    }, []);
+    // can fail in some environments. Replaced the complex `reduce` with a `map` for simpler and more robust type inference.
+    const instanceData = transposedData.map(trace =>
+        trace.filter((point): point is string | number => point != null)
+    );
 
     if (instanceData.length === 0 || instanceData[0].length < 2) {
         throw new Error("Ensemble data must have at least 2 time points and 1 instance.");
