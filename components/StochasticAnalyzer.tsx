@@ -297,7 +297,7 @@ C,1`;
                 </button>
 
                 {sessionMenuOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-50">
+                  <div className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-[9999]">
                     <div className="p-4 space-y-3">
                       <div>
                         <label className="text-sm font-semibold text-slate-300 block mb-2">Save Current Session</label>
