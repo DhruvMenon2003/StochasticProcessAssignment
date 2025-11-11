@@ -482,9 +482,9 @@ function analyzeTimeSeriesEnsemble(
 ): AnalysisResult {
     // Robustly handle the (T | undefined)[][] return type from transpose without type assertions.
     const transposedData = transpose(data.rows.map(row => row.slice(1)));
-    // FIX: A type assertion was failing to correctly type the filtered array. Using a
-    // type guard with .filter() is the correct and type-safe way to narrow the array elements.
-    const instanceData = transposedData.map((trace: ((string|number)|undefined)[]) =>
+    // FIX: The complex type annotations were causing inference issues in some environments.
+    // Simplifying to rely on the type guard's inference is more robust.
+    const instanceData = transposedData.map(trace =>
         trace.filter((point): point is string | number => point != null)
     );
 

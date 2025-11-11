@@ -1,19 +1,18 @@
 {
-  "name": "stochastic-process-assignment-helper",
+  "name": "stochastic-process-analyzer",
   "private": true,
   "version": "0.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "deploy": "vite build && gh-pages -d dist"
+    "preview": "vite preview"
   },
   "dependencies": {
-    "@google/genai": "^1.28.0",
-    "lucide-react": "^0.553.0",
+    "react-dom": "^19.2.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "lucide-react": "0.395.0",
+    "@google/genai": "^1.29.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

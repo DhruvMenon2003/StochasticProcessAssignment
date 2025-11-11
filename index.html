@@ -1,16 +1,48 @@
-
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stochastic Process Assignment Helper</title>
+    <title>Stochastic Process Analyzer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       body {
-        background-color: #111827;
+        background-color: #030712; /* A darker base for the gradient */
         color: #e5e7eb;
+      }
+      @keyframes slide-in-from-bottom {
+        from {
+          transform: translateY(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+      @keyframes slide-in-from-right {
+        from {
+          transform: translateX(20px);
+          opacity: 0;
+        }
+        to {
+          transform: translateX(0);
+          opacity: 1;
+        }
+      }
+      .animate-in {
+        animation-duration: var(--duration, 300ms);
+        animation-fill-mode: forwards;
+      }
+      .slide-in-from-bottom {
+        animation-name: slide-in-from-bottom;
+      }
+      .slide-in-from-right {
+        animation-name: slide-in-from-right;
+      }
+      .duration-300 {
+        --duration: 300ms;
       }
     </style>
   <script type="importmap">
@@ -19,13 +51,14 @@
     "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
     "react": "https://aistudiocdn.com/react@^19.2.0",
     "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.28.0"
+    "lucide-react": "https://cdn.jsdelivr.net/npm/lucide-react@0.395.0/dist/lucide-react.min.js",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.29.0"
   }
 }
 </script>
 </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
+    <script type="module" src="/index.js"></script>
   </body>
 </html>
