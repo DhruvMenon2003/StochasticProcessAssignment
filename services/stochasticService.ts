@@ -21,7 +21,7 @@ import {
   VariableInfo,
   Moments,
 } from '../types';
-import { transpose, cartesianProduct, jensenShannonDistance, jensenShannonDivergence } from '../utils/mathUtils';
+import { transpose, cartesianProduct, jensenShannonDistance, jensenShannonDivergence, mutualInformation, pearsonCorrelation, distanceCorrelation } from '../utils/mathUtils';
 
 // --- Helper Functions ---
 
@@ -556,6 +556,146 @@ function analyzeTimeSeriesEnsemble(
 }
 
 
+// --- Dependence Analysis ---
+
+function calculateDependenceAnalysis(
+  data: CsvData,
+  variableInfo: VariableInfo[],
+  empirical: DistributionAnalysis,
+  modelResults: ModelAnalysisResult[]
+): DependenceAnalysisPair[] {
+  const { headers, rows } = data;
+  const transposedData = transpose(rows);
+  const numVars = headers.length;
+  const dependencePairs: DependenceAnalysisPair[] = [];
+
+  // Analyze all unique pairs of variables
+  for (let i = 0; i < numVars - 1; i++) {
+    for (let j = i + 1; j < numVars; j++) {
+      const var1Name = headers[i];
+      const var2Name = headers[j];
+      const var1Info = variableInfo.find(v => v.name === var1Name);
+      const var2Info = variableInfo.find(v => v.name === var2Name);
+
+      if (!var1Info || !var2Info) continue;
+
+      // Calculate empirical metrics
+      const empiricalMetrics = calculatePairwiseDependence(
+        transposedData[i],
+        transposedData[j],
+        var1Info,
+        var2Info,
+        empirical.marginals[var1Name],
+        empirical.marginals[var2Name],
+        empirical.joint,
+        headers
+      );
+
+      // Calculate model metrics for each model
+      const modelMetrics = modelResults
+        .filter(m => m.distributions)
+        .map(m => {
+          const modelDist = m.distributions!;
+          return {
+            modelName: m.name,
+            ...calculatePairwiseDependence(
+              transposedData[i],
+              transposedData[j],
+              var1Info,
+              var2Info,
+              modelDist.marginals[var1Name],
+              modelDist.marginals[var2Name],
+              modelDist.joint,
+              headers
+            )
+          };
+        });
+
+      dependencePairs.push({
+        variablePair: [var1Name, var2Name],
+        empiricalMetrics,
+        modelMetrics
+      });
+    }
+  }
+
+  return dependencePairs;
+}
+
+function calculatePairwiseDependence(
+  data1: (string | number | undefined)[],
+  data2: (string | number | undefined)[],
+  var1Info: VariableInfo,
+  var2Info: VariableInfo,
+  marginal1: Distribution,
+  marginal2: Distribution,
+  jointDist: Distribution,
+  allHeaders: string[]
+): { mutualInformation: number | null; distanceCorrelation: number | null; pearsonCorrelation: number | null } {
+
+  // Calculate Mutual Information (works for all variable types)
+  let mi: number | null = null;
+  try {
+    // Get bivariate marginal from joint distribution
+    const bivariateJoint: Distribution = {};
+    for (const key in jointDist) {
+      const states = key.split('|');
+      const idx1 = allHeaders.indexOf(var1Info.name);
+      const idx2 = allHeaders.indexOf(var2Info.name);
+
+      if (idx1 !== -1 && idx2 !== -1 && states[idx1] !== undefined && states[idx2] !== undefined) {
+        const pairKey = `${states[idx1]}|${states[idx2]}`;
+        bivariateJoint[pairKey] = (bivariateJoint[pairKey] || 0) + jointDist[key];
+      }
+    }
+
+    if (Object.keys(bivariateJoint).length > 0) {
+      mi = mutualInformation(marginal1, marginal2, bivariateJoint);
+    }
+  } catch (error) {
+    mi = null;
+  }
+
+  // Calculate Pearson and Distance Correlation (only for numerical variables)
+  let pearson: number | null = null;
+  let distCorr: number | null = null;
+
+  if (var1Info.type === 'numerical' && var2Info.type === 'numerical') {
+    try {
+      // Filter out undefined values and convert to numbers
+      const validPairs: [number, number][] = [];
+      for (let k = 0; k < data1.length; k++) {
+        const val1 = data1[k];
+        const val2 = data2[k];
+        if (val1 !== undefined && val2 !== undefined) {
+          const num1 = typeof val1 === 'number' ? val1 : parseFloat(String(val1));
+          const num2 = typeof val2 === 'number' ? val2 : parseFloat(String(val2));
+          if (!isNaN(num1) && !isNaN(num2)) {
+            validPairs.push([num1, num2]);
+          }
+        }
+      }
+
+      if (validPairs.length >= 2) {
+        const nums1 = validPairs.map(p => p[0]);
+        const nums2 = validPairs.map(p => p[1]);
+
+        pearson = pearsonCorrelation(nums1, nums2);
+        distCorr = distanceCorrelation(nums1, nums2);
+      }
+    } catch (error) {
+      pearson = null;
+      distCorr = null;
+    }
+  }
+
+  return {
+    mutualInformation: mi,
+    distanceCorrelation: distCorr,
+    pearsonCorrelation: pearson
+  };
+}
+
 // --- Main Service Function ---
 
 export function analyzeStochasticProcess(
@@ -670,15 +810,16 @@ export function analyzeStochasticProcess(
     });
   }
 
-  // Add placeholder data structures for joint multivariate analysis
+  // Calculate dependence analysis for joint multivariate data
   let dependenceAnalysis: DependenceAnalysisPair[] | undefined = undefined;
   let conditionalDistributions: ConditionalDistributionTable[] | undefined = undefined;
   let conditionalMoments: ConditionalMomentsTable[] | undefined = undefined;
 
   if (mode === 'joint' && data.headers.length > 1) {
-      // Note: Full implementation of these calculations is pending.
-      // This provides the necessary structure for the UI to render correctly.
-      dependenceAnalysis = [];
+      // Calculate stochastic dependence metrics for all variable pairs
+      dependenceAnalysis = calculateDependenceAnalysis(data, variableInfo, empirical, modelResults);
+
+      // Conditional distributions and moments remain as placeholders for now
       conditionalDistributions = [];
       conditionalMoments = [];
   }
