@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Upload, Calculator, PlayCircle, CheckCircle, TrendingUp, BarChart3, Info, Save, FolderOpen, Download, Trash2 } from 'lucide-react';
 import { parseCsvData, analyzeCsvStructure } from '../utils/csvParser';
 import { VariableInfo, ModelDef, CsvData } from '../types';
@@ -27,6 +27,7 @@ const StochasticAnalyzer = () => {
   const [savedSessions, setSavedSessions] = useState<Record<string, Session>>({});
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
+  const sessionMenuRef = useRef<HTMLDivElement>(null);
 
   // Variable type modal
   const [isTypeModalOpen, setIsTypeModalOpen] = useState(false);
@@ -90,6 +91,23 @@ C,1`;
       localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(autosave));
     }
   }, [csvData, variableInfo, models]);
+
+  // Handle click outside session menu to close it
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node)) {
+        setSessionMenuOpen(false);
+      }
+    };
+
+    if (sessionMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [sessionMenuOpen]);
 
   const handleDataSubmit = useCallback(() => {
     if (!csvData.trim()) return;
@@ -156,7 +174,6 @@ C,1`;
     setSavedSessions(updated);
     localStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
     setNewSessionName('');
-    setSessionMenuOpen(false);
     alert(`Session "${newSessionName}" saved successfully!`);
   }, [newSessionName, csvData, variableInfo, models, savedSessions]);
 
@@ -168,7 +185,6 @@ C,1`;
       setModels(session.models);
       const parsed = parseCsvData(session.csvData);
       setParsedData(parsed);
-      setSessionMenuOpen(false);
       setActiveStep(session.variableInfo.length > 0 ? 2 : 1);
       alert(`Session "${name}" loaded successfully!`);
     }
@@ -199,7 +215,6 @@ C,1`;
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setSessionMenuOpen(false);
   }, [savedSessions]);
 
   const handleImportSessions = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -220,7 +235,6 @@ C,1`;
         setSavedSessions(merged);
         localStorage.setItem(SESSIONS_KEY, JSON.stringify(merged));
         alert(`Successfully imported ${Object.keys(imported).length} session(s)!`);
-        setSessionMenuOpen(false);
       } catch (error) {
         alert('Failed to import sessions. Please check the file format.');
         console.error('Import error:', error);
@@ -273,7 +287,7 @@ C,1`;
               </button>
 
               {/* Session Manager */}
-              <div className="relative">
+              <div className="relative" ref={sessionMenuRef}>
                 <button
                   onClick={() => setSessionMenuOpen(!sessionMenuOpen)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-all border border-slate-600 flex items-center gap-2"
