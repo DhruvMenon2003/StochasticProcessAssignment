@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { Upload, Calculator, PlayCircle, CheckCircle, TrendingUp, BarChart3, Info, Save, FolderOpen, Download, Trash2 } from 'lucide-react';
 import { parseCsvData, analyzeCsvStructure } from '../utils/csvParser';
 import { VariableInfo, ModelDef, CsvData } from '../types';
@@ -28,6 +29,8 @@ const StochasticAnalyzer = () => {
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [newSessionName, setNewSessionName] = useState('');
   const sessionMenuRef = useRef<HTMLDivElement>(null);
+  const sessionButtonRef = useRef<HTMLButtonElement>(null);
+  const [dropdownPosition, setDropdownPosition] = useState({ top: 0, right: 0 });
 
   // Variable type modal
   const [isTypeModalOpen, setIsTypeModalOpen] = useState(false);
@@ -92,10 +95,22 @@ C,1`;
     }
   }, [csvData, variableInfo, models]);
 
+  // Update dropdown position when opened
+  const updateDropdownPosition = useCallback(() => {
+    if (sessionButtonRef.current) {
+      const rect = sessionButtonRef.current.getBoundingClientRect();
+      setDropdownPosition({
+        top: rect.bottom + 8,
+        right: window.innerWidth - rect.right,
+      });
+    }
+  }, []);
+
   // Handle click outside session menu to close it
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node)) {
+      if (sessionMenuRef.current && !sessionMenuRef.current.contains(event.target as Node) &&
+          sessionButtonRef.current && !sessionButtonRef.current.contains(event.target as Node)) {
         setSessionMenuOpen(false);
       }
     };
@@ -256,6 +271,13 @@ C,1`;
     }
   }, []);
 
+  const toggleSessionMenu = useCallback(() => {
+    if (!sessionMenuOpen) {
+      updateDropdownPosition();
+    }
+    setSessionMenuOpen(!sessionMenuOpen);
+  }, [sessionMenuOpen, updateDropdownPosition]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       <VariableTypeModal
@@ -266,7 +288,7 @@ C,1`;
       />
 
       {/* Header */}
-      <div className="bg-slate-900/50 backdrop-blur-sm border-b border-slate-700/50">
+      <div className="bg-slate-900/50 backdrop-blur-sm border-b border-slate-700/50 relative z-50">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
@@ -287,95 +309,14 @@ C,1`;
               </button>
 
               {/* Session Manager */}
-              <div className="relative" ref={sessionMenuRef}>
-                <button
-                  onClick={() => setSessionMenuOpen(!sessionMenuOpen)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-all border border-slate-600 flex items-center gap-2"
-                >
-                  <FolderOpen className="w-4 h-4" />
-                  Sessions
-                </button>
-
-                {sessionMenuOpen && (
-                  <div className="absolute top-full right-0 mt-2 w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-[9999]">
-                    <div className="p-4 space-y-3">
-                      <div>
-                        <label className="text-sm font-semibold text-slate-300 block mb-2">Save Current Session</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={newSessionName}
-                            onChange={(e) => setNewSessionName(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleSaveSession()}
-                            placeholder="Enter session name..."
-                            className="flex-1 px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                          />
-                          <button
-                            onClick={handleSaveSession}
-                            disabled={!newSessionName.trim()}
-                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg transition-all"
-                          >
-                            <Save className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      {Object.keys(savedSessions).length > 0 && (
-                        <>
-                          <hr className="border-slate-600" />
-                          <div className="max-h-60 overflow-y-auto space-y-2">
-                            <h4 className="text-sm font-semibold text-slate-300">Saved Sessions</h4>
-                            {Object.keys(savedSessions).map(name => (
-                              <div key={name} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg">
-                                <span className="text-sm text-slate-300 truncate flex-1">{name}</span>
-                                <div className="flex items-center gap-1">
-                                  <button
-                                    onClick={() => handleLoadSession(name)}
-                                    className="p-1.5 text-slate-400 hover:text-green-400 transition-colors"
-                                    title="Load Session"
-                                  >
-                                    <FolderOpen className="w-4 h-4" />
-                                  </button>
-                                  <button
-                                    onClick={() => handleDeleteSession(name)}
-                                    className="p-1.5 text-slate-400 hover:text-red-400 transition-colors"
-                                    title="Delete Session"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </>
-                      )}
-
-                      <hr className="border-slate-600" />
-                      <div className="flex gap-2">
-                        <label className="flex-1 cursor-pointer">
-                          <input
-                            type="file"
-                            accept=".json"
-                            onChange={handleImportSessions}
-                            className="hidden"
-                          />
-                          <div className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm text-center transition-all flex items-center justify-center gap-2">
-                            <Upload className="w-4 h-4" />
-                            Import
-                          </div>
-                        </label>
-                        <button
-                          onClick={handleExportSessions}
-                          className="flex-1 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-all flex items-center justify-center gap-2"
-                        >
-                          <Download className="w-4 h-4" />
-                          Export
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <button
+                ref={sessionButtonRef}
+                onClick={toggleSessionMenu}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-sm font-medium transition-all border border-slate-600 flex items-center gap-2"
+              >
+                <FolderOpen className="w-4 h-4" />
+                Sessions
+              </button>
 
               <button
                 onClick={handleClearAll}
@@ -600,6 +541,95 @@ C,1`;
           </div>
         </div>
       </div>
+
+      {/* Session Dropdown Portal - renders at document body level */}
+      {sessionMenuOpen && ReactDOM.createPortal(
+        <div
+          ref={sessionMenuRef}
+          className="fixed w-80 bg-slate-800 border border-slate-600 rounded-lg shadow-xl z-[99999]"
+          style={{
+            top: `${dropdownPosition.top}px`,
+            right: `${dropdownPosition.right}px`
+          }}
+        >
+          <div className="p-4 space-y-3">
+            <div>
+              <label className="text-sm font-semibold text-slate-300 block mb-2">Save Current Session</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newSessionName}
+                  onChange={(e) => setNewSessionName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleSaveSession()}
+                  placeholder="Enter session name..."
+                  className="flex-1 px-3 py-2 bg-slate-900 text-slate-200 border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <button
+                  onClick={handleSaveSession}
+                  disabled={!newSessionName.trim()}
+                  className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white rounded-lg transition-all"
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {Object.keys(savedSessions).length > 0 && (
+              <>
+                <hr className="border-slate-600" />
+                <div className="max-h-60 overflow-y-auto space-y-2">
+                  <h4 className="text-sm font-semibold text-slate-300">Saved Sessions</h4>
+                  {Object.keys(savedSessions).map(name => (
+                    <div key={name} className="flex items-center justify-between bg-slate-900/50 p-2 rounded-lg">
+                      <span className="text-sm text-slate-300 truncate flex-1">{name}</span>
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleLoadSession(name)}
+                          className="p-1.5 text-slate-400 hover:text-green-400 transition-colors"
+                          title="Load Session"
+                        >
+                          <FolderOpen className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSession(name)}
+                          className="p-1.5 text-slate-400 hover:text-red-400 transition-colors"
+                          title="Delete Session"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            <hr className="border-slate-600" />
+            <div className="flex gap-2">
+              <label className="flex-1 cursor-pointer">
+                <input
+                  type="file"
+                  accept=".json"
+                  onChange={handleImportSessions}
+                  className="hidden"
+                />
+                <div className="px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm text-center transition-all flex items-center justify-center gap-2">
+                  <Upload className="w-4 h-4" />
+                  Import
+                </div>
+              </label>
+              <button
+                onClick={handleExportSessions}
+                className="flex-1 px-3 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded-lg text-sm transition-all flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Export
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };
